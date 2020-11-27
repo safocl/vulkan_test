@@ -1,1 +1,1 @@
-# PokerCalc2 is a new implementation PokerCalc.
+# It's testing vulkan api.
