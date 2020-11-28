@@ -50,8 +50,8 @@ int main() {
           event = xcb_wait_for_event( xcbConnect ) ) {
         switch ( event->response_type & ~0x80 ) {
         case XCB_EXPOSE:
-            xcb_flush( xcbConnect );
             renderer.draw();
+            //xcb_flush( xcbConnect );
             break;
         case XCB_KEY_PRESS:
             if ( reinterpret_cast< xcb_key_press_event_t * >( event )

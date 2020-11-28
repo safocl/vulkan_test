@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <vulkan/vulkan_core.h>
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 
@@ -28,8 +29,7 @@ public:
         std::vector< vk::CommandBuffer > commandBuffers;
     };
 
-
-    Vulkan(xcb_connection_t &, xcb_window_t  );
+    Vulkan( xcb_connection_t &, xcb_window_t );
     Vulkan( const Vulkan & ) = default;
     Vulkan( Vulkan && )      = default;
     Vulkan & operator=( const Vulkan & ) = default;
@@ -43,23 +43,25 @@ private:
 
     ExtensionsVec instanseExtensions {
         VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_KHR_XCB_SURFACE_EXTENSION_NAME
+        VK_KHR_XCB_SURFACE_EXTENSION_NAME/*,
+        VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+        VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME */
     };
     ExtensionsVec deviceExtensions {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME/*,
+        VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME */
     };
 
     vk::Instance       instance;
     vk::PhysicalDevice gpu;
     vk::SurfaceKHR     surface;
-    vk::SwapchainKHR swapchain;
-    vk::Semaphore semImageAvaible;
-    vk::Semaphore semRenderingFinished;
+    vk::SwapchainKHR   swapchain;
+    vk::Semaphore      semImageAvaible;
+    vk::Semaphore      semRenderingFinished;
 
     QueueTypeConfig graphicConf;
 
-    std::vector <vk::Image> swapchainImages;
-
+    std::vector< vk::Image > swapchainImages;
 };
 
 }   // namespace core::renderer

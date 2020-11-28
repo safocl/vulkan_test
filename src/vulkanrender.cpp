@@ -1,6 +1,7 @@
 #include "vulkanrender.hpp"
 #include <array>
 #include <cstdint>
+#include <exception>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -48,7 +49,7 @@ swapchainInit( const vk::PhysicalDevice &      gpu,
     std::cout << std::endl;
 
     if ( gpuSurfaceFormats.size() == 1 &&
-         gpuSurfaceFormats[ 0 ].format == vk::Format::eUndefined )
+         gpuSurfaceFormats.at( 0 ).format == vk::Format::eUndefined )
         *gpuSurfaceFormat =
         vk::SurfaceFormatKHR { .format = vk::Format::eB8G8R8A8Unorm,
                                .colorSpace =
@@ -164,9 +165,9 @@ Vulkan::Vulkan( xcb_connection_t & xcbConnect,
 
     graphicConf.queueFamilyIndex = getGraphicsQueueFamilyIndex( gpu );
 
-    std::vector< vk::DeviceQueueCreateInfo > deviceQueueCreateInfos;
-    float                                    priorities[] = { 1.0f };
+    float priorities[] = { 1.0f };
 
+    std::vector< vk::DeviceQueueCreateInfo > deviceQueueCreateInfos;
     deviceQueueCreateInfos.push_back( vk::DeviceQueueCreateInfo {
     .queueFamilyIndex = graphicConf.queueFamilyIndex,
     .queueCount       = 1,
@@ -218,9 +219,9 @@ Vulkan::Vulkan( xcb_connection_t & xcbConnect,
     };
 
     const vk::ClearColorValue clearColorValue(
-    std::array< float, 4 > { 1.0f, 0.5f, 0.0f, 1.0f } );
+    std::array< float, 4 > { 1.0f, 0.5f, 0.0f, 0.0f } );
 
-    const vk::ArrayProxy< const vk::ImageSubresourceRange > ranges {
+    const std::array< const vk::ImageSubresourceRange, 1 > ranges {
         vk::ImageSubresourceRange { .aspectMask =
                                     vk::ImageAspectFlagBits::eColor,
                                     .baseMipLevel   = 0,
@@ -229,95 +230,119 @@ Vulkan::Vulkan( xcb_connection_t & xcbConnect,
                                     .layerCount     = 1 }
     };
 
+    auto imageMemoryBarierPresentToClear =
+    std::make_unique< vk::ImageMemoryBarrier >(
+    vk::ImageMemoryBarrier {
+    .srcAccessMask       = vk::AccessFlagBits::eMemoryRead,
+    .dstAccessMask       = vk::AccessFlagBits::eTransferWrite,
+    .oldLayout           = vk::ImageLayout::eUndefined,
+    .newLayout           = vk::ImageLayout::eTransferDstOptimal,
+    .srcQueueFamilyIndex = graphicConf.queueFamilyIndex,
+    .dstQueueFamilyIndex = graphicConf.queueFamilyIndex,
+    .subresourceRange    = ranges.at( 0 ) } );
+
+    auto imageMemoryBarierClearToPresent =
+    std::make_unique< vk::ImageMemoryBarrier >(
+    vk::ImageMemoryBarrier {
+    .srcAccessMask       = vk::AccessFlagBits::eTransferWrite,
+    .dstAccessMask       = vk::AccessFlagBits::eMemoryWrite,
+    .oldLayout           = vk::ImageLayout::eTransferDstOptimal,
+    .newLayout           = vk::ImageLayout::ePresentSrcKHR,
+    .srcQueueFamilyIndex = graphicConf.queueFamilyIndex,
+    .dstQueueFamilyIndex = graphicConf.queueFamilyIndex,
+    .subresourceRange    = ranges.at( 0 ) } );
+
     for ( std::uint32_t i = 0; i < swapchainImages.size(); ++i ) {
-        const vk::ArrayProxy< const vk::ImageMemoryBarrier >
-        imageMemoryBarierPresentToClear { vk::ImageMemoryBarrier {
-        .srcAccessMask       = vk::AccessFlagBits::eMemoryRead,
-        .dstAccessMask       = vk::AccessFlagBits::eTransferWrite,
-        .oldLayout           = vk::ImageLayout::eUndefined,
-        .newLayout           = vk::ImageLayout::eTransferDstOptimal,
-        .srcQueueFamilyIndex = graphicConf.queueFamilyIndex,
-        .dstQueueFamilyIndex = graphicConf.queueFamilyIndex,
-        .image               = swapchainImages[ i ],
-        .subresourceRange    = ranges.front() } };
+        imageMemoryBarierClearToPresent->image =
+        swapchainImages.at( i );
+        imageMemoryBarierPresentToClear->image =
+        swapchainImages.at( i );
 
-        const vk::ArrayProxy< const vk::ImageMemoryBarrier >
-        imageMemoryBarierClearToPresent { vk::ImageMemoryBarrier {
-        .srcAccessMask       = vk::AccessFlagBits::eTransferWrite,
-        .dstAccessMask       = vk::AccessFlagBits::eMemoryWrite,
-        .oldLayout           = vk::ImageLayout::eTransferDstOptimal,
-        .newLayout           = vk::ImageLayout::ePresentSrcKHR,
-        .srcQueueFamilyIndex = graphicConf.queueFamilyIndex,
-        .dstQueueFamilyIndex = graphicConf.queueFamilyIndex,
-        .image               = swapchainImages[ i ],
-        .subresourceRange    = ranges.front() } };
+        graphicConf.commandBuffers.at( i ).begin( cmdBufferBI );
 
-        graphicConf.commandBuffers[ i ].begin( cmdBufferBI );
-
-        graphicConf.commandBuffers[ i ].pipelineBarrier(
+        graphicConf.commandBuffers.at( i ).pipelineBarrier(
         vk::PipelineStageFlagBits::eTransfer,
         vk::PipelineStageFlagBits::eTransfer,
         vk::DependencyFlags(),
         {},
         {},
-        imageMemoryBarierPresentToClear );
+        { *imageMemoryBarierPresentToClear } );
 
-        graphicConf.commandBuffers[ i ].clearColorImage(
-        swapchainImages[ i ],
+        graphicConf.commandBuffers.at( i ).clearColorImage(
+        swapchainImages.at( i ),
         vk::ImageLayout::eTransferDstOptimal,
         clearColorValue,
         ranges );
 
-        graphicConf.commandBuffers[ i ].pipelineBarrier(
+        graphicConf.commandBuffers.at( i ).pipelineBarrier(
         vk::PipelineStageFlagBits::eTransfer,
         vk::PipelineStageFlagBits::eBottomOfPipe,
         vk::DependencyFlags(),
         {},
         {},
-        imageMemoryBarierClearToPresent  );
+        { *imageMemoryBarierClearToPresent } );
 
-        graphicConf.commandBuffers[ i ].end();
+        graphicConf.commandBuffers.at( i ).end();
     }
 
     semImageAvaible      = graphicConf.logicDev.createSemaphore( {} );
     semRenderingFinished = graphicConf.logicDev.createSemaphore( {} );
+
+    std::cout << std::endl
+              << "Command buffer count :"
+              << graphicConf.commandBuffers.size() << std::endl;
+    std::cout << std::endl
+              << "Image count : " << swapchainImages.size()
+              << std::endl;
 }
 
 void Vulkan::draw() {
-    const vk::ArrayProxy<
-    const vk::Flags< vk::PipelineStageFlagBits > >
-    pipelineStageFlags { vk::PipelineStageFlagBits::eTransfer };
+    try {
+        std::uint32_t asqNextImgIndex =
+        graphicConf.logicDev
+        .acquireNextImageKHR(
+        swapchain,
+        std::numeric_limits< std::uint32_t >::max(),
+        semImageAvaible )
+        .value;
 
-    std::uint32_t asqNextImgIndex =
-    graphicConf.logicDev
-    .acquireNextImageKHR( swapchain,
-                          std::numeric_limits< std::uint32_t >::max(),
-                          semImageAvaible )
-    .value;
+        std::cout << std::endl
+                  << "asqNextImgIndex number : " << asqNextImgIndex
+                  << std::endl;
 
-    const vk::ArrayProxy< const vk::SubmitInfo > subInfo {
-        vk::SubmitInfo {
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = &semImageAvaible,
-        .pWaitDstStageMask  = pipelineStageFlags.begin(),
-        .commandBufferCount = 1,
-        .pCommandBuffers =
-        &graphicConf.commandBuffers[ asqNextImgIndex ],
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores    = &semRenderingFinished }
-    };
+        const std::
+        array< const vk::Flags< vk::PipelineStageFlagBits >, 1 >
+        pipelineStageFlags { vk::PipelineStageFlagBits::eTransfer };
 
-    graphicConf.queue.submit( subInfo );
+        const std::array< const vk::SubmitInfo, 1 > subInfo {
+            vk::SubmitInfo {
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores    = &semImageAvaible,
+            .pWaitDstStageMask  = pipelineStageFlags.data(),
+            .commandBufferCount = 1,
+            .pCommandBuffers =
+            &graphicConf.commandBuffers.at( asqNextImgIndex ),
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores    = &semRenderingFinished }
+        };
 
-    vk::PresentInfoKHR present { .waitSemaphoreCount = 1,
-                                 .pWaitSemaphores =
-                                 &semRenderingFinished,
-                                 .swapchainCount = 1,
-                                 .pSwapchains    = &swapchain,
-                                 .pImageIndices  = &asqNextImgIndex };
-    if ( !( graphicConf.queue.presentKHR( present ) ==
-            vk::Result::eSuccess ) )
-        throw std::runtime_error( "Fail presenting" );
+        graphicConf.queue.submit( subInfo );
+        std::cout << "Submit is success" << std::endl;
+
+        vk::PresentInfoKHR present { .waitSemaphoreCount = 1,
+                                     .pWaitSemaphores =
+                                     &semRenderingFinished,
+                                     .swapchainCount = 1,
+                                     .pSwapchains    = &swapchain,
+                                     .pImageIndices =
+                                     &asqNextImgIndex };
+        if ( !( graphicConf.queue.presentKHR( present ) ==
+                vk::Result::eSuccess ) )
+            throw std::runtime_error( "Fail presenting" );
+        std::cout << "Present is success" << std::endl;
+    } catch ( const std::exception & e ) {
+        std::cout << e.what() << std::endl;
+    }
 }
 
 }   // namespace core::renderer
