@@ -1,7 +1,12 @@
 [
 {
   "directory": "/home/safff/Projects/vulkan_xcb/build/src",
-  "command": "/usr/bin/c++   -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -g -fPIC -pie -fstack-protector -std=gnu++2a -o CMakeFiles/vulkan_xcb.dir/main.cpp.o -c /home/safff/Projects/vulkan_xcb/src/main.cpp",
+  "command": "/usr/bin/c++   -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -g -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o CMakeFiles/vulkan_xcb.dir/main.cpp.o -c /home/safff/Projects/vulkan_xcb/src/main.cpp",
   "file": "/home/safff/Projects/vulkan_xcb/src/main.cpp"
+},
+{
+  "directory": "/home/safff/Projects/vulkan_xcb/build/src",
+  "command": "/usr/bin/c++   -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -g -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o CMakeFiles/vulkan_xcb.dir/vulkanrender.cpp.o -c /home/safff/Projects/vulkan_xcb/src/vulkanrender.cpp",
+  "file": "/home/safff/Projects/vulkan_xcb/src/vulkanrender.cpp"
 }
 ]
