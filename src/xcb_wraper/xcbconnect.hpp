@@ -5,10 +5,10 @@
 
 namespace xcbwraper {
 struct XCBConnect final {
-    xcb_connection_t * connect;
+    xcb_connection_t * mConnect;
 
-    XCBConnect() : connect( xcb_connect( nullptr, nullptr ) ) {}
-    ~XCBConnect() { xcb_disconnect( connect ); }
-    operator xcb_connection_t *() { return connect; }
+    XCBConnect() : mConnect( xcb_connect( nullptr, nullptr ) ) {}
+    ~XCBConnect() { xcb_disconnect( mConnect ); }
+    operator xcb_connection_t *() { return mConnect; }
 };
 }

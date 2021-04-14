@@ -17,7 +17,7 @@ class XCBWindowProp final {
     WindowIDType mWindowID;
 
 public:
-    XCBWindowProp( uint32_t windowID );
+    explicit XCBWindowProp( WindowIDType windowID );
     ~XCBWindowProp();
     WindowGeometry Geometry() const;
     XCBWindowClass Class() const;

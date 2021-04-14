@@ -14,6 +14,7 @@
 #include <vulkan/vulkan.hpp>
 
 #include "composite.hpp"
+#include "xcb_wraper/xcbconnect.hpp"
 
 namespace core::renderer {
 
@@ -47,9 +48,9 @@ public:
 
     using QueueTypeConfigsVec = std::vector< QueueTypeConfig >;
 
-    VulkanBase( CreateInfo && );
-    VulkanBase( const VulkanBase & ) = default;
-    VulkanBase( VulkanBase && )      = default;
+    explicit VulkanBase( CreateInfo && );
+    explicit VulkanBase( const VulkanBase & ) = default;
+    explicit VulkanBase( VulkanBase && )      = default;
     VulkanBase & operator=( const VulkanBase & ) = default;
     VulkanBase & operator=( VulkanBase && ) = default;
     virtual ~VulkanBase();
@@ -81,8 +82,8 @@ protected:
 class VulkanGraphicRender : public VulkanBase {
 public:
     struct CreateInfo final {
-        //        xcb_connection_t * xcbConnect;
-        xcb_window_t xcbWindow;
+        xcbwraper::XCBConnect xcbConnect;
+        xcb_window_t       xcbWindow;
     };
 
     VulkanGraphicRender( VulkanBase::CreateInfo &&          baseInfo,
@@ -98,31 +99,30 @@ protected:
     vk::SwapchainKHR mSwapchain;
     vk::Device       mLogicDev;
 
-    xcb_connection_t * mXcbConnect;
-    xcb_window_t       mXcbWindow;
+//    xcbwraper::XCBConnect mXcbConnect;
+    xcb_window_t          mXcbWindow;
 
     ImageVec             mSwapchainImages;
     SemaphoresVec        mSemaphores;
     composite::Composite mComposite;
 };
 
-[[nodiscard]] std::vector< vk::CommandBuffer >
-commandBuffersInit( const vk::Device &      logicDev,
-                    const vk::CommandPool & commandPool,
-                    std::uint32_t           swapchainImagesCount );
+class VulkanRenderInstance final {
+    VulkanRenderInstance();
 
-[[nodiscard]] vk::SwapchainKHR
-swapchainInit( const vk::PhysicalDevice &          gpu,
-               const vk::Device &                  logicDev,
-               const vk::SurfaceKHR &              surface,
-               const VulkanBase::QueueTypeConfig & graphicConf,
-               vk::SwapchainKHR                    oldSwapchain = nullptr );
+public:
+    using Shared           = std::shared_ptr< VulkanRenderInstance >;
+    using XcbConnectShared = std::shared_ptr< xcbwraper::XCBConnect >;
+    ~VulkanRenderInstance();
 
-[[nodiscard]] vk::PhysicalDevice getDiscreteGpu( const vk::Instance & instance );
+    static Shared init();
+    void          run() const;
 
-[[nodiscard]] QueueFamilyIndex
-getGraphicsQueueFamilyIndex( const vk::PhysicalDevice & gpu );
+private:
+    static Shared mInstance;
 
-void fillCmdBuffers( QueueFamilyIndex, CommandBuffersVec &, ImageVec & );
+    XcbConnectShared mXcbConnect;
+};
+
 
 }   // namespace core::renderer

@@ -1,8 +1,10 @@
 #include "vulkanrender.hpp"
 #include "composite.hpp"
+#include "xcb_wraper/xcbconnect.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -18,6 +20,26 @@
 #include <chrono>
 
 namespace core::renderer {
+
+namespace {
+[[nodiscard]] std::vector< vk::CommandBuffer >
+commandBuffersInit( const vk::Device &      logicDev,
+                    const vk::CommandPool & commandPool,
+                    std::uint32_t           swapchainImagesCount );
+
+[[nodiscard]] vk::SwapchainKHR
+swapchainInit( const vk::PhysicalDevice &          gpu,
+               const vk::Device &                  logicDev,
+               const vk::SurfaceKHR &              surface,
+               const VulkanBase::QueueTypeConfig & graphicConf,
+               vk::SwapchainKHR                    oldSwapchain = nullptr );
+
+[[nodiscard]] vk::PhysicalDevice getDiscreteGpu( const vk::Instance & instance );
+
+[[nodiscard]] QueueFamilyIndex
+getGraphicsQueueFamilyIndex( const vk::PhysicalDevice & gpu );
+
+void fillCmdBuffers( QueueFamilyIndex, CommandBuffersVec &, ImageVec & );
 
 std::vector< vk::CommandBuffer >
 commandBuffersInit( const vk::Device &      logicDev,
@@ -194,9 +216,10 @@ void fillCmdBuffers( QueueFamilyIndex    queueFamilyIndex,
     }
 }
 
-void fillCmdBuffersForPresentComposite( QueueFamilyIndex    queueFamilyIndex,
-                                        CommandBuffersVec & commandBuffers,
-                                        ImageVec &          swapchainImages ) {
+void fillCmdBuffersForPresentComposite
+[[maybe_unused]] ( QueueFamilyIndex    queueFamilyIndex,
+                   CommandBuffersVec & commandBuffers,
+                   ImageVec &          swapchainImages ) {
     vk::CommandBufferBeginInfo cmdBufferBI {
         .flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse
     };
@@ -251,6 +274,8 @@ void fillCmdBuffersForPresentComposite( QueueFamilyIndex    queueFamilyIndex,
         commandBuffers.at( i ).end();
     }
 }
+}   // namespace
+
 VulkanBase::VulkanBase( CreateInfo && info ) :
 mInstance( info.instance ), mGpu( info.physDev ),
 mExtansions( info.extansions ) /* swapchainImages( info.swapchain == vk::SwapchainKHR()
@@ -265,12 +290,15 @@ VulkanGraphicRender::VulkanGraphicRender(
 VulkanBase::CreateInfo &&          baseInfo,
 VulkanGraphicRender::CreateInfo && graphicRenderCreateInfo ) :
 VulkanBase( std::move( baseInfo ) ),
-mXcbConnect( xcb_connect( nullptr, nullptr ) ),
+//mXcbConnect(  ),
 //xcbConnect( graphicRenderCreateInfo.xcbConnect ),
 mXcbWindow( graphicRenderCreateInfo.xcbWindow ), mComposite() {
-    vk::XcbSurfaceCreateInfoKHR surfaceCI { .connection = mXcbConnect,
-                                            .window     = mXcbWindow };
-    mSurface = mInstance.createXcbSurfaceKHR( surfaceCI );
+    {
+        vk::XcbSurfaceCreateInfoKHR surfaceCI { .connection =
+                                                graphicRenderCreateInfo.xcbConnect,
+                                                .window = mXcbWindow };
+        mSurface = mInstance.createXcbSurfaceKHR( surfaceCI );
+    }
 
     mGpu = getDiscreteGpu( mInstance );
     std::cout << "Discrete GPU is : " << mGpu.getProperties().deviceName << std::endl
@@ -281,26 +309,26 @@ mXcbWindow( graphicRenderCreateInfo.xcbWindow ), mComposite() {
     mQueueConfigs.emplace_back(
     QueueTypeConfig { .queueFamilyIndex = getGraphicsQueueFamilyIndex( mGpu ),
                       .priorities       = QueuesPrioritiesVec { 1.0f } } );
+    {
+        std::vector< vk::DeviceQueueCreateInfo > deviceQueueCreateInfos;
+        deviceQueueCreateInfos.push_back( vk::DeviceQueueCreateInfo {
+        .queueFamilyIndex = mQueueConfigs.at( 0 ).queueFamilyIndex,
+        .queueCount       = 1,
+        .pQueuePriorities = mQueueConfigs.at( 0 ).priorities.data() } );
+        auto gpuFeatures = mGpu.getFeatures();
 
-    std::vector< vk::DeviceQueueCreateInfo > deviceQueueCreateInfos;
-    deviceQueueCreateInfos.push_back( vk::DeviceQueueCreateInfo {
-    .queueFamilyIndex = mQueueConfigs.at( 0 ).queueFamilyIndex,
-    .queueCount       = 1,
-    .pQueuePriorities = mQueueConfigs.at( 0 ).priorities.data() } );
-    auto gpuFeatures = mGpu.getFeatures();
+        vk::DeviceCreateInfo deviceCreateInfo {
+            .queueCreateInfoCount =
+            static_cast< std::uint32_t >( deviceQueueCreateInfos.size() ),
+            .pQueueCreateInfos = deviceQueueCreateInfos.data(),
+            .enabledExtensionCount =
+            static_cast< std::uint32_t >( mExtansions.device.size() ),
+            .ppEnabledExtensionNames = mExtansions.device.data(),
+            .pEnabledFeatures        = &gpuFeatures
+        };
 
-    vk::DeviceCreateInfo deviceCreateInfo {
-        .queueCreateInfoCount =
-        static_cast< std::uint32_t >( deviceQueueCreateInfos.size() ),
-        .pQueueCreateInfos = deviceQueueCreateInfos.data(),
-        .enabledExtensionCount =
-        static_cast< std::uint32_t >( mExtansions.device.size() ),
-        .ppEnabledExtensionNames = mExtansions.device.data(),
-        .pEnabledFeatures        = &gpuFeatures
-    };
-
-    mLogicDev = mGpu.createDevice( deviceCreateInfo );
-
+        mLogicDev = mGpu.createDevice( deviceCreateInfo );
+    }
     mQueues.push_back( mLogicDev.getQueue( mQueueConfigs.at( 0 ).queueFamilyIndex, 0 ) );
 
     if ( !mGpu.getSurfaceSupportKHR( mQueueConfigs.at( 0 ).queueFamilyIndex, mSurface ) )
@@ -367,13 +395,6 @@ void VulkanGraphicRender::draw() {
 
     try {
         [[maybe_unused]] auto result = mQueues.at( 0 ).presentKHR( present );
-        //    switch ( queues.at( 0 ).presentKHR( present ) ) {
-        //    case vk::Result::eErrorOutOfDateKHR:
-        //        //    update();
-        //        //std::cout << "Present is success" << std::endl;
-        //        break;
-        //    default: break;
-        //    }
     } catch ( const vk::OutOfDateKHRError & e ) {
         update();
         std::cout << e.what() << std::endl;
@@ -383,17 +404,10 @@ void VulkanGraphicRender::draw() {
 void VulkanGraphicRender::update() {
     mLogicDev.waitIdle();
 
-    //queueConf.logicDev.freeCommandBuffers( graphicConf.commandPool,
-    //                                         queueConf.commandBuffers );
-    //queueConf.logicDev.destroySwapchainKHR( swapchain );
-
     mSwapchain =
     swapchainInit( mGpu, mLogicDev, mSurface, mQueueConfigs.at( 0 ), mSwapchain );
 
     mSwapchainImages = mLogicDev.getSwapchainImagesKHR( mSwapchain );
-
-    //queueConf.commandBuffers =
-    //commandBuffersInit( queueConf, swapchainImages.size() );
 
     for ( auto cmdBuffer : mCommandBuffers )
         cmdBuffer.reset();
@@ -409,5 +423,122 @@ void VulkanGraphicRender::printSurfaceExtents() const {
               << std::endl;
 }
 
-// namespace
+namespace {
+
+template < class Renderer > concept HasDrawMethod = requires( Renderer renderer ) {
+    { renderer.draw() };
+};
+
+template < HasDrawMethod Renderer >
+void runRenderLoop( Renderer renderer, xcbwraper::XCBConnect xcbConnect ) {
+    for ( bool breakLoop = false; !breakLoop; ) {
+        renderer.draw();
+        auto event =
+        xcb_poll_for_event( static_cast< xcb_connection_t * >( xcbConnect ) );
+        if ( !event )
+            continue;
+        //for ( auto event = xcb_poll_for_event( xcbConnect ); event != nullptr;
+        //      event      = xcb_poll_for_event( xcbConnect ) ) {
+        switch ( event->response_type & ~0x80 ) {
+            //case XCB_EXPOSE: renderer.draw(); break;
+
+        case XCB_KEY_PRESS:
+            if ( reinterpret_cast< xcb_key_press_event_t * >( event )->detail == 24 ) {
+                breakLoop = true;
+            }
+        }
+        delete event;
+    }
+}
+}   // namespace
+
+VulkanRenderInstance::Shared VulkanRenderInstance::init() {
+    if ( !mInstance )
+        mInstance =
+        std::shared_ptr< VulkanRenderInstance > { new VulkanRenderInstance() };
+    assert( mInstance && "VulkanRenderInstance is not created" );
+    return mInstance;
+}
+
+VulkanRenderInstance::Shared VulkanRenderInstance::mInstance {};
+
+VulkanRenderInstance::VulkanRenderInstance() :
+mXcbConnect( std::make_shared< xcbwraper::XCBConnect >() ) {
+    assert( mXcbConnect && "XCB connect is not created" );
+}
+
+VulkanRenderInstance::~VulkanRenderInstance() = default;
+
+void VulkanRenderInstance::run() const {
+    auto screen = xcb_setup_roots_iterator(
+                  xcb_get_setup( static_cast< xcb_connection_t * >( *mXcbConnect ) ) )
+                  .data;
+    assert( screen != nullptr && "xcb_setup_roots_iterator return nullptr" );
+
+    std::uint32_t winValList[] = {
+        /*XCB_EVENT_MASK_EXPOSURE |*/ XCB_EVENT_MASK_KEY_PRESS
+    };
+
+    //    auto overlayReply = xcb_composite_get_overlay_window_reply(
+    //    xcbConnect, xcb_composite_get_overlay_window( xcbConnect, screen->root ), nullptr );
+    //
+    //    xcb_window_t window /* = xcb_generate_id( xcbConnect )*/;
+    //    if ( overlayReply ) {
+    //        window = overlayReply->overlay_win;
+    //    } else
+    //        throw std::runtime_error( "overlay not presented." );
+    //
+    //    xcb_change_window_attributes( xcbConnect, window, XCB_CW_EVENT_MASK, winValList );
+
+    xcb_window_t window =
+    xcb_generate_id( static_cast< xcb_connection_t * >( *mXcbConnect ) );
+    xcb_create_window( static_cast< xcb_connection_t * >( *mXcbConnect ),
+                       screen->root_depth,
+                       window,
+                       screen->root,
+                       100,
+                       100,
+                       600,
+                       300,
+                       2,
+                       XCB_WINDOW_CLASS_COPY_FROM_PARENT,
+                       screen->root_visual,
+                       XCB_CW_EVENT_MASK,
+                       winValList );
+
+    xcb_map_window( static_cast< xcb_connection_t * >( *mXcbConnect ), window );
+
+    xcb_flush( static_cast< xcb_connection_t * >( *mXcbConnect ) );
+
+    auto appInfo = std::make_unique< vk::ApplicationInfo >(
+    vk::ApplicationInfo { .pApplicationName   = "vulkan_xcb",
+                          .applicationVersion = VK_MAKE_VERSION( 0, 0, 1 ),
+                          .pEngineName        = "vulkan_xcb_engine",
+                          .engineVersion      = VK_MAKE_VERSION( 0, 0, 1 ),
+                          .apiVersion         = VK_API_VERSION_1_0 } );
+
+    core::renderer::VulkanBase::Extensions extensions {
+        .instance = { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_XCB_SURFACE_EXTENSION_NAME },
+        .device   = { VK_KHR_SWAPCHAIN_EXTENSION_NAME }
+    };
+    vk::Instance vulkanXCBInstance = vk::createInstance( vk::InstanceCreateInfo {
+    .pApplicationInfo        = appInfo.get(),
+    .enabledExtensionCount   = static_cast< std::uint32_t >( extensions.instance.size() ),
+    .ppEnabledExtensionNames = extensions.instance.data() } );
+
+    auto gpu = core::renderer::getDiscreteGpu( vulkanXCBInstance );
+    core::renderer::VulkanBase::CreateInfo vulkanBaseCI { .instance   = vulkanXCBInstance,
+                                                          .physDev    = gpu,
+                                                          .extansions = extensions };
+    core::renderer::VulkanGraphicRender::CreateInfo vulkanRenderCI {
+        .xcbConnect = *mXcbConnect, .xcbWindow = window
+    };
+
+    core::renderer::VulkanGraphicRender renderer( std::move( vulkanBaseCI ),
+                                                  std::move( vulkanRenderCI ) );
+    runRenderLoop< VulkanGraphicRender >( renderer, *mXcbConnect );
+
+    xcb_destroy_window( static_cast< xcb_connection_t * >( *mXcbConnect ), window );
+    xcb_flush( static_cast< xcb_connection_t * >( *mXcbConnect ) );
+}
 }   // namespace core::renderer
