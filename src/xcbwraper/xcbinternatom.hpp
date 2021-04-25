@@ -8,9 +8,8 @@
 #include <cassert>
 #include <xcb/xcb.h>
 
-#include "xcbconnect.hpp"
+#include "xcbconnection.hpp"
 #include "xcbwindowprop.hpp"
-
 
 namespace xcbwraper {
 template < class T > class XCBInternAtom {
@@ -29,30 +28,31 @@ public:
 template < class T >
 [[nodiscard]] std::vector< uint32_t >
 XCBInternAtom< T >::getInternAtomValueArray( std::string_view atom ) {
-    XCBConnect connect {};
-    auto       atomCookie = xcb_intern_atom( connect, false, atom.size(), atom.data() );
+    XCBConnection connection {};
+    auto atomCookie = xcb_intern_atom( connection, false, atom.size(), atom.data() );
     std::unique_ptr< xcb_intern_atom_reply_t > atomRep { xcb_intern_atom_reply(
-    connect, atomCookie, nullptr ) };
+    connection, atomCookie, nullptr ) };
 
-    assert( atomRep != nullptr );
+    assert( atomRep );
 
     size_t                  offset { 0 }, maxQueueLength { 32 }, remaining { 0 };
     std::vector< uint32_t > replyMessage {};
     replyMessage.reserve( maxQueueLength );
 
-    auto screen = xcb_setup_roots_iterator( xcb_get_setup( connect ) ).data;
+    auto screen = xcb_setup_roots_iterator( xcb_get_setup( connection ) ).data;
 
     do {
         using UniquePropRep = std::unique_ptr< xcb_get_property_reply_t >;
 
-        auto          propCookie = xcb_get_property( connect,
+        auto          propCookie = xcb_get_property( connection,
                                             false,
                                             screen->root,
                                             atomRep->atom,
                                             XCB_GET_PROPERTY_TYPE_ANY,
                                             offset,
                                             maxQueueLength );
-        UniquePropRep propRep { xcb_get_property_reply( connect, propCookie, nullptr ) };
+        UniquePropRep propRep { xcb_get_property_reply(
+        connection, propCookie, nullptr ) };
 
         auto propValue =
         static_cast< uint32_t * >( xcb_get_property_value( propRep.get() ) );
@@ -76,27 +76,27 @@ XCBInternAtom< T >::getInternAtomValueArray( std::string_view atom ) {
 
 template < class T >
 [[nodiscard]] uint32_t XCBInternAtom< T >::getInternAtomValue( std::string_view atom ) {
-    XCBConnect connect {};
-    auto       atomCookie = xcb_intern_atom( connect, false, atom.size(), atom.data() );
+    XCBConnection connection {};
+    auto atomCookie = xcb_intern_atom( connection, false, atom.size(), atom.data() );
     std::unique_ptr< xcb_intern_atom_reply_t > atomRep { xcb_intern_atom_reply(
-    connect, atomCookie, nullptr ) };
+    connection, atomCookie, nullptr ) };
 
     assert( atomRep != nullptr );
 
     size_t offset { 0 }, maxQueueLength { 1 };
 
-    auto screen = xcb_setup_roots_iterator( xcb_get_setup( connect ) ).data;
+    auto screen = xcb_setup_roots_iterator( xcb_get_setup( connection ) ).data;
 
     using UniquePropRep = std::unique_ptr< xcb_get_property_reply_t >;
 
-    auto          propCookie = xcb_get_property( connect,
+    auto          propCookie = xcb_get_property( connection,
                                         false,
                                         screen->root,
                                         atomRep->atom,
                                         XCB_GET_PROPERTY_TYPE_ANY,
                                         offset,
                                         maxQueueLength );
-    UniquePropRep propRep { xcb_get_property_reply( connect, propCookie, nullptr ) };
+    UniquePropRep propRep { xcb_get_property_reply( connection, propCookie, nullptr ) };
 
     if ( propRep->bytes_after > 0 )
         throw std::runtime_error( "Data is't single" );
@@ -116,4 +116,4 @@ public:
         winPropVec.emplace_back( el );
     return winPropVec;
 }
-}
+}   // namespace xcbwraper

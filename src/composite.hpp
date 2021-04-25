@@ -1,17 +1,23 @@
 #pragma once
 
+#include "xcbwraper/xcbconnection.hpp"
+#include "xcbwraper/window.hpp"
+
 #include <xcb/composite.h>
 #include <xcb/xcb.h>
+#include <memory>
 
 namespace core::composite {
 
 class Composite final {
-    xcb_connection_t * mXcbConnection;
-    xcb_window_t       mCompositeOverlayWindow;
+    xcbwraper::XcbConnectionShared mXcbConnection;
+    xcbwraper::Window     mCompositeOverlayWindow;
+    xcbwraper::Window     mRootWindow;
 
 public:
-    Composite();
+    explicit Composite( xcbwraper::XcbConnectionShared );
     ~Composite();
-    xcb_window_t getCompositeOverleyWindow() const;
+    xcbwraper::Window getCompositeOverleyWindow() const;
+    xcbwraper::Window getRootWindow() const;
 };
 }   // namespace core::composite

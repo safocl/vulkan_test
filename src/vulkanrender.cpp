@@ -1,6 +1,7 @@
 #include "vulkanrender.hpp"
 #include "composite.hpp"
-#include "xcb_wraper/xcbconnect.hpp"
+#include "xcbwraper/xcbconnection.hpp"
+#include "xcbwraper/xcbinternatom.hpp"
 
 #include <algorithm>
 #include <array>
@@ -117,7 +118,6 @@ vk::SwapchainKHR swapchainInit( const vk::PhysicalDevice &          gpu,
         .clipped      = VK_FALSE,
         .oldSwapchain = oldSwapchain
     };
-
     vk::SwapchainKHR swapchain = logicDev.createSwapchainKHR( swapchainCI );
     std::cout << std::endl << "Swapchain is created" << std::endl;
     return swapchain;
@@ -292,10 +292,12 @@ VulkanGraphicRender::CreateInfo && graphicRenderCreateInfo ) :
 VulkanBase( std::move( baseInfo ) ),
 //mXcbConnect(  ),
 //xcbConnect( graphicRenderCreateInfo.xcbConnect ),
-mXcbWindow( graphicRenderCreateInfo.xcbWindow ), mComposite() {
+mXcbWindow( graphicRenderCreateInfo.xcbWindow ) /*,
+mComposite( graphicRenderCreateInfo.xcbConnect )*/
+{
     {
         vk::XcbSurfaceCreateInfoKHR surfaceCI { .connection =
-                                                graphicRenderCreateInfo.xcbConnect,
+                                                *graphicRenderCreateInfo.xcbConnect,
                                                 .window = mXcbWindow };
         mSurface = mInstance.createXcbSurfaceKHR( surfaceCI );
     }
@@ -361,6 +363,22 @@ mXcbWindow( graphicRenderCreateInfo.xcbWindow ), mComposite() {
 VulkanGraphicRender::~VulkanGraphicRender() = default;
 
 void VulkanGraphicRender::draw() {
+    //std::cout << "TEST POINT" << std::endl;
+    {
+        xcbwraper::AtomNetClientList clientList {};
+        auto                         clientsVec = clientList.get();
+
+        for ( auto && client : clientsVec )
+            std::cout << "TEST POINT " << client.getID() << std::endl
+                      << client.getClass() << std::endl
+                      << std::endl;
+        xcbwraper::XcbConnectionShared connection =
+        std::make_shared< xcbwraper::XCBConnection >();
+
+        xcbwraper::Window window { xcbwraper::Window::CreateInfo {
+        .connection = connection, .window = clientsVec.at( 1 ).getID() } };
+        mRawOverlayImage = window.getImageData();
+    }
     mLogicDev.waitIdle();
     const auto asqNextImgIndex = mLogicDev.acquireNextImageKHR(
     mSwapchain, std::numeric_limits< std::uint64_t >::max(), mSemaphores.at( 0 ) );
@@ -430,11 +448,11 @@ template < class Renderer > concept HasDrawMethod = requires( Renderer renderer 
 };
 
 template < HasDrawMethod Renderer >
-void runRenderLoop( Renderer renderer, xcbwraper::XCBConnect xcbConnect ) {
+void runRenderLoop( Renderer renderer, xcbwraper::XcbConnectionShared xcbConnect ) {
     for ( bool breakLoop = false; !breakLoop; ) {
         renderer.draw();
         auto event =
-        xcb_poll_for_event( static_cast< xcb_connection_t * >( xcbConnect ) );
+        xcb_poll_for_event( static_cast< xcb_connection_t * >( *xcbConnect ) );
         if ( !event )
             continue;
         //for ( auto event = xcb_poll_for_event( xcbConnect ); event != nullptr;
@@ -463,8 +481,8 @@ VulkanRenderInstance::Shared VulkanRenderInstance::init() {
 VulkanRenderInstance::Shared VulkanRenderInstance::mInstance {};
 
 VulkanRenderInstance::VulkanRenderInstance() :
-mXcbConnect( std::make_shared< xcbwraper::XCBConnect >() ) {
-    assert( mXcbConnect && "XCB connect is not created" );
+mXcbConnect( std::make_shared< xcbwraper::XCBConnection >() ) {
+    assert( mXcbConnect && "XCB connection is not created" );
 }
 
 VulkanRenderInstance::~VulkanRenderInstance() = default;
@@ -517,26 +535,24 @@ void VulkanRenderInstance::run() const {
                           .engineVersion      = VK_MAKE_VERSION( 0, 0, 1 ),
                           .apiVersion         = VK_API_VERSION_1_0 } );
 
-    core::renderer::VulkanBase::Extensions extensions {
-        .instance = { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_XCB_SURFACE_EXTENSION_NAME },
-        .device   = { VK_KHR_SWAPCHAIN_EXTENSION_NAME }
-    };
+    VulkanBase::Extensions extensions { .instance = { VK_KHR_SURFACE_EXTENSION_NAME,
+                                                      VK_KHR_XCB_SURFACE_EXTENSION_NAME },
+                                        .device   = { VK_KHR_SWAPCHAIN_EXTENSION_NAME } };
     vk::Instance vulkanXCBInstance = vk::createInstance( vk::InstanceCreateInfo {
     .pApplicationInfo        = appInfo.get(),
     .enabledExtensionCount   = static_cast< std::uint32_t >( extensions.instance.size() ),
     .ppEnabledExtensionNames = extensions.instance.data() } );
 
-    auto gpu = core::renderer::getDiscreteGpu( vulkanXCBInstance );
-    core::renderer::VulkanBase::CreateInfo vulkanBaseCI { .instance   = vulkanXCBInstance,
-                                                          .physDev    = gpu,
-                                                          .extansions = extensions };
-    core::renderer::VulkanGraphicRender::CreateInfo vulkanRenderCI {
-        .xcbConnect = *mXcbConnect, .xcbWindow = window
-    };
+    auto                            gpu = getDiscreteGpu( vulkanXCBInstance );
+    VulkanBase::CreateInfo          vulkanBaseCI { .instance   = vulkanXCBInstance,
+                                          .physDev    = gpu,
+                                          .extansions = extensions };
+    VulkanGraphicRender::CreateInfo vulkanRenderCI { .xcbConnect = mXcbConnect,
+                                                     .xcbWindow  = window };
 
-    core::renderer::VulkanGraphicRender renderer( std::move( vulkanBaseCI ),
-                                                  std::move( vulkanRenderCI ) );
-    runRenderLoop< VulkanGraphicRender >( renderer, *mXcbConnect );
+    VulkanGraphicRender renderer( std::move( vulkanBaseCI ),
+                                  std::move( vulkanRenderCI ) );
+    runRenderLoop< VulkanGraphicRender >( renderer, mXcbConnect );
 
     xcb_destroy_window( static_cast< xcb_connection_t * >( *mXcbConnect ), window );
     xcb_flush( static_cast< xcb_connection_t * >( *mXcbConnect ) );

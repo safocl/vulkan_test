@@ -14,7 +14,7 @@
 #include <vulkan/vulkan.hpp>
 
 #include "composite.hpp"
-#include "xcb_wraper/xcbconnect.hpp"
+#include "xcbwraper/xcbconnection.hpp"
 
 namespace core::renderer {
 
@@ -82,8 +82,8 @@ protected:
 class VulkanGraphicRender : public VulkanBase {
 public:
     struct CreateInfo final {
-        xcbwraper::XCBConnect xcbConnect;
-        xcb_window_t       xcbWindow;
+        xcbwraper::XcbConnectionShared xcbConnect;
+        xcb_window_t     xcbWindow;
     };
 
     VulkanGraphicRender( VulkanBase::CreateInfo &&          baseInfo,
@@ -99,20 +99,22 @@ protected:
     vk::SwapchainKHR mSwapchain;
     vk::Device       mLogicDev;
 
-//    xcbwraper::XCBConnect mXcbConnect;
-    xcb_window_t          mXcbWindow;
+    //    xcbwraper::XCBConnection mXcbConnect;
+    xcb_window_t mXcbWindow;
 
-    ImageVec             mSwapchainImages;
-    SemaphoresVec        mSemaphores;
-    composite::Composite mComposite;
+    ImageVec               mSwapchainImages;
+    SemaphoresVec          mSemaphores;
+    vk::Buffer             mOverlayImageBuffer;
+    std::vector< uint8_t > mRawOverlayImage;
+    //    composite::Composite mComposite;
 };
 
 class VulkanRenderInstance final {
     VulkanRenderInstance();
 
 public:
-    using Shared           = std::shared_ptr< VulkanRenderInstance >;
-    using XcbConnectShared = std::shared_ptr< xcbwraper::XCBConnect >;
+    using Shared = std::shared_ptr< VulkanRenderInstance >;
+
     ~VulkanRenderInstance();
 
     static Shared init();
@@ -121,8 +123,7 @@ public:
 private:
     static Shared mInstance;
 
-    XcbConnectShared mXcbConnect;
+    xcbwraper::XcbConnectionShared mXcbConnect;
 };
-
 
 }   // namespace core::renderer
