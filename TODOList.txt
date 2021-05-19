@@ -1,3 +1,7 @@
 [*] Place the queue entity
 [] Refactoring to cpp-modules
 [*] Add the render instance to initializing the render workspace
+[] Add method returning the list of the windows into the composite class and use this list in the render class.
+[*] Do refactor for the abstract class Renderer with need the virtual methods.
+[] Create the exception classes.
+[] Do creating composite, getImage from composite window and destroy composite.

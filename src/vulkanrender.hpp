@@ -15,6 +15,7 @@
 
 #include "composite.hpp"
 #include "xcbwraper/xcbconnection.hpp"
+#include "render.hpp"
 
 namespace core::renderer {
 
@@ -56,8 +57,6 @@ public:
     virtual ~VulkanBase();
 
 protected:
-    static constexpr std::uint8_t nBuffers = 3;
-
     //ExtensionsVec instanseExtensions {
     //    VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_XCB_SURFACE_EXTENSION_NAME /*,
     //    VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
@@ -79,33 +78,41 @@ protected:
     QueueTypeConfigsVec mQueueConfigs;
 };
 
-class VulkanGraphicRender : public VulkanBase {
+class VulkanGraphicRender : public Renderer, public VulkanBase {
 public:
     struct CreateInfo final {
         xcbwraper::XcbConnectionShared xcbConnect;
-        xcb_window_t     xcbWindow;
+        xcb_window_t                   xcbWindow;
     };
 
-    VulkanGraphicRender( VulkanBase::CreateInfo &&          baseInfo,
-                         VulkanGraphicRender::CreateInfo && graphicRenderCreateInfo );
+    VulkanGraphicRender(
+    VulkanBase::CreateInfo &&          baseInfo,
+    VulkanGraphicRender::CreateInfo && graphicRenderCreateInfo );
 
     virtual ~VulkanGraphicRender();
-    void draw();
+    void draw() override;
     void update();
     void printSurfaceExtents() const;
 
 protected:
-    vk::SurfaceKHR   mSurface;
-    vk::SwapchainKHR mSwapchain;
-    vk::Device       mLogicDev;
+    static constexpr std::uint8_t countSwapChainBuffers = 3;
+
+    vk::SurfaceKHR       mSurface;
+    vk::SurfaceFormatKHR mSurfaceFormat;
+    vk::SwapchainKHR     mSwapchain;
+    vk::Device           mLogicDev;
+    CommandBuffersVec    mSwapchainCmdBuffers;
 
     //    xcbwraper::XCBConnection mXcbConnect;
-    xcb_window_t mXcbWindow;
+    xcbwraper::WindowShared mDstWindow;
 
-    ImageVec               mSwapchainImages;
-    SemaphoresVec          mSemaphores;
-    vk::Buffer             mOverlayImageBuffer;
-    std::vector< uint8_t > mRawOverlayImage;
+    ImageVec      mSwapchainImages;
+    SemaphoresVec mSemaphores;
+    //vk::Buffer                         mSrcImageBuffer;
+    vk::Image                    mSrcImage;
+    vk::DeviceMemory             mSrcRawImage;
+    std::vector< vk::ImageBlit > mSrcToDstRegions;
+    xcbwraper::WindowShared      mSrcWindow;
     //    composite::Composite mComposite;
 };
 

@@ -11,13 +11,13 @@ namespace core::composite {
 
 class Composite final {
     xcbwraper::XcbConnectionShared mXcbConnection;
-    xcbwraper::Window     mCompositeOverlayWindow;
-    xcbwraper::Window     mRootWindow;
+    xcbwraper::WindowShared        mCompositeOverlayWindow;
+    xcbwraper::WindowShared        mRootWindow;
 
 public:
     explicit Composite( xcbwraper::XcbConnectionShared );
     ~Composite();
-    xcbwraper::Window getCompositeOverleyWindow() const;
-    xcbwraper::Window getRootWindow() const;
+    xcbwraper::WindowShared getCompositeOverleyWindow() const;
+    xcbwraper::WindowShared getRootWindow() const;
 };
 }   // namespace core::composite

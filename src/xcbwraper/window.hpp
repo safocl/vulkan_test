@@ -7,26 +7,31 @@
 
 namespace xcbwraper {
 
-using XcbConnectionShared = std::shared_ptr< XCBConnection >;
-
 class Window final {
-    XcbConnectionShared mConnection;
-    xcb_window_t        mWindow;
+    XcbConnectionShared mConnection {};
+    xcb_window_t        mWindow { XCB_NONE };
 
 public:
     struct CreateInfo final {
-        const XcbConnectionShared connection;
-        const xcb_window_t        window;
+        XcbConnectionShared connection {};
+        xcb_window_t        window { XCB_NONE };
     };
 
     Window();
     explicit Window( CreateInfo );
+    Window( const Window & ) = default;
+    Window( Window && )      = default;
     ~Window();
+    Window & operator=( const Window & ) = default;
+    Window & operator=( Window && ) = default;
     Window & operator=( xcb_window_t & );
              operator xcb_window_t() const;
+             operator bool() const;
 
-    XCBWindowProp          getProperties() const;
-    std::vector< uint8_t > getImageData() const;
+    [[nodiscard]] XCBWindowProp getProperties() const;
+    std::vector< uint8_t >      getImageData() const;
 };
+
+using WindowShared = std::shared_ptr< Window >;
 
 }   // namespace xcbwraper
