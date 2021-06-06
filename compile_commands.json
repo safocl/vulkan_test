@@ -1,12 +1,47 @@
 [
 {
-  "directory": "/home/safff/Projects/vulkan_xcb/build/src",
-  "command": "/usr/bin/c++   -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -g -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o CMakeFiles/vulkan_xcb.dir/main.cpp.o -c /home/safff/Projects/vulkan_xcb/src/main.cpp",
+  "directory": "/home/safff/Projects/vulkan_xcb/build",
+  "command": "/usr/bin/c++ -O2 -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o src/CMakeFiles/vulkan_xcb.dir/composite.cpp.o -c /home/safff/Projects/vulkan_xcb/src/composite.cpp",
+  "file": "/home/safff/Projects/vulkan_xcb/src/composite.cpp"
+},
+{
+  "directory": "/home/safff/Projects/vulkan_xcb/build",
+  "command": "/usr/bin/c++ -O2 -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o src/CMakeFiles/vulkan_xcb.dir/main.cpp.o -c /home/safff/Projects/vulkan_xcb/src/main.cpp",
   "file": "/home/safff/Projects/vulkan_xcb/src/main.cpp"
 },
 {
-  "directory": "/home/safff/Projects/vulkan_xcb/build/src",
-  "command": "/usr/bin/c++   -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -g -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o CMakeFiles/vulkan_xcb.dir/vulkanrender.cpp.o -c /home/safff/Projects/vulkan_xcb/src/vulkanrender.cpp",
+  "directory": "/home/safff/Projects/vulkan_xcb/build",
+  "command": "/usr/bin/c++ -O2 -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o src/CMakeFiles/vulkan_xcb.dir/vulkanrender.cpp.o -c /home/safff/Projects/vulkan_xcb/src/vulkanrender.cpp",
   "file": "/home/safff/Projects/vulkan_xcb/src/vulkanrender.cpp"
+},
+{
+  "directory": "/home/safff/Projects/vulkan_xcb/build",
+  "command": "/usr/bin/c++ -O2 -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o src/xcbwraper/CMakeFiles/xcbwraper.dir/errno-exception.cpp.o -c /home/safff/Projects/vulkan_xcb/src/xcbwraper/errno-exception.cpp",
+  "file": "/home/safff/Projects/vulkan_xcb/src/xcbwraper/errno-exception.cpp"
+},
+{
+  "directory": "/home/safff/Projects/vulkan_xcb/build",
+  "command": "/usr/bin/c++ -O2 -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o src/xcbwraper/CMakeFiles/xcbwraper.dir/posix-shm.cpp.o -c /home/safff/Projects/vulkan_xcb/src/xcbwraper/posix-shm.cpp",
+  "file": "/home/safff/Projects/vulkan_xcb/src/xcbwraper/posix-shm.cpp"
+},
+{
+  "directory": "/home/safff/Projects/vulkan_xcb/build",
+  "command": "/usr/bin/c++ -O2 -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o src/xcbwraper/CMakeFiles/xcbwraper.dir/window.cpp.o -c /home/safff/Projects/vulkan_xcb/src/xcbwraper/window.cpp",
+  "file": "/home/safff/Projects/vulkan_xcb/src/xcbwraper/window.cpp"
+},
+{
+  "directory": "/home/safff/Projects/vulkan_xcb/build",
+  "command": "/usr/bin/c++ -O2 -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o src/xcbwraper/CMakeFiles/xcbwraper.dir/windowgeometry.cpp.o -c /home/safff/Projects/vulkan_xcb/src/xcbwraper/windowgeometry.cpp",
+  "file": "/home/safff/Projects/vulkan_xcb/src/xcbwraper/windowgeometry.cpp"
+},
+{
+  "directory": "/home/safff/Projects/vulkan_xcb/build",
+  "command": "/usr/bin/c++ -O2 -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o src/xcbwraper/CMakeFiles/xcbwraper.dir/winintersection.cpp.o -c /home/safff/Projects/vulkan_xcb/src/xcbwraper/winintersection.cpp",
+  "file": "/home/safff/Projects/vulkan_xcb/src/xcbwraper/winintersection.cpp"
+},
+{
+  "directory": "/home/safff/Projects/vulkan_xcb/build",
+  "command": "/usr/bin/c++ -O2 -Wall -Wextra -Wformat -Wformat-security -pedantic -pedantic-errors -Werror -fPIC -pie -fstack-protector -pthread -fstack-protector-strong -std=gnu++2a -o src/xcbwraper/CMakeFiles/xcbwraper.dir/xcbwindowprop.cpp.o -c /home/safff/Projects/vulkan_xcb/src/xcbwraper/xcbwindowprop.cpp",
+  "file": "/home/safff/Projects/vulkan_xcb/src/xcbwraper/xcbwindowprop.cpp"
 }
 ]

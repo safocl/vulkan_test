@@ -1,4 +1,5 @@
 #include "composite.hpp"
+
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -14,22 +15,26 @@ mXcbConnection( xcbConnection ) {
     if ( !mXcbConnection )
         throw std::runtime_error(
         "In Composite::Composite(XcbConnectionShared xcbConnection) xcbConnection is nullptr" );
-    std::unique_ptr< xcb_screen_t > screen {
+}
+
+Composite::~Composite() {   //= default;
+    //    xcb_composite_release_overlay_window( *mXcbConnection,
+    //                                          *mCompositeOverlayWindow );
+}
+
+xcbwraper::WindowShared Composite::getCompositeOverleyWindow() const {
+    xcb_screen_t * screen {
         xcb_setup_roots_iterator( xcb_get_setup( *mXcbConnection ) ).data
     };
-    assert( screen != nullptr );
-
-    xcbwraper::Window::CreateInfo windowsCI { .connection = mXcbConnection,
-                                              .window     = screen->root };
-    mRootWindow = std::make_shared< xcbwraper::Window >();
-
+    assert( screen );
     constexpr std::uint32_t XCB_COMPOSITE_MAJOR_VER = 0;
     constexpr std::uint32_t XCB_COMPOSITE_MINOR_VER = 4;
 
     auto compositeVersion = xcb_composite_query_version(
     *mXcbConnection, XCB_COMPOSITE_MAJOR_VER, XCB_COMPOSITE_MINOR_VER );
     std::unique_ptr< xcb_composite_query_version_reply_t > compositeVersionReply(
-    xcb_composite_query_version_reply( *mXcbConnection, compositeVersion, nullptr ) );
+    xcb_composite_query_version_reply(
+    *mXcbConnection, compositeVersion, nullptr ) );
     if ( compositeVersionReply->major_version < XCB_COMPOSITE_MAJOR_VER ||
          compositeVersionReply->minor_version < XCB_COMPOSITE_MINOR_VER )
         throw std::runtime_error(
@@ -40,22 +45,30 @@ mXcbConnection( xcbConnection ) {
     xcb_composite_get_overlay_window( *mXcbConnection, screen->root ),
     nullptr );
 
-    if ( overlayWindowReply && overlayWindowReply->overlay_win != XCB_NONE ) {
+    xcbwraper::WindowShared compositeOverlayWindow;
+
+    if ( overlayWindowReply ) {
         xcbwraper::Window::CreateInfo windowsCI { .connection = mXcbConnection,
                                                   .window =
                                                   overlayWindowReply->overlay_win };
-        mCompositeOverlayWindow = std::make_shared< xcbwraper::Window >( windowsCI );
+        compositeOverlayWindow =
+        std::make_shared< xcbwraper::CompositeWindow >( windowsCI );
     } else
         throw std::runtime_error( "Getting overlay windows is failed." );
-}
 
-Composite::~Composite() {   //= default;
-    xcb_composite_release_overlay_window( *mXcbConnection, *mCompositeOverlayWindow );
+    return compositeOverlayWindow;
 }
+xcbwraper::WindowShared Composite::getRootWindow() const {
+    xcb_screen_t * screen {
+        xcb_setup_roots_iterator( xcb_get_setup( *mXcbConnection ) ).data
+    };
+    assert( screen );
 
-xcbwraper::WindowShared Composite::getCompositeOverleyWindow() const {
-    return mCompositeOverlayWindow;
+    xcbwraper::Window::CreateInfo windowsCI { .connection = mXcbConnection,
+                                              .window     = screen->root };
+    auto rootWindow = std::make_shared< xcbwraper::Window >( windowsCI );
+
+    return rootWindow;
 }
-xcbwraper::WindowShared Composite::getRootWindow() const { return mRootWindow; }
 
 }   // namespace core::composite

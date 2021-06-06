@@ -1,12 +1,16 @@
 #include "vulkanrender.hpp"
 #include "composite.hpp"
+#include "xcbwraper/posix-shm.hpp"
+#include "xcbwraper/windowgeometry.hpp"
 #include "xcbwraper/xcbconnection.hpp"
 #include "xcbwraper/xcbinternatom.hpp"
 
+#include <X11/Xlib.h>
+#include <chrono>
+#include <mutex>
+#include <thread>
 #include <algorithm>
 #include <array>
-#include <bits/c++config.h>
-#include <bits/stdint-uintn.h>
 #include <cassert>
 #include <cstdint>
 #include <exception>
@@ -18,11 +22,9 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_core.h>
-#include <xcb/xcb.h>
-#include <thread>
-#include <chrono>
 
 namespace core::renderer {
 
@@ -31,26 +33,25 @@ namespace {
 commandBuffersInit( const vk::Device &      logicDev,
                     const vk::CommandPool & commandPool,
                     std::uint32_t           swapchainImagesCount ) {
-    auto commandBufferAI = std::make_unique< vk::CommandBufferAllocateInfo >(
-    vk::CommandBufferAllocateInfo { .commandPool = commandPool,
-                                    .level       = vk::CommandBufferLevel::ePrimary,
-                                    .commandBufferCount = swapchainImagesCount } );
+    vk::CommandBufferAllocateInfo commandBufferAI { .commandPool = commandPool,
+                                                    .level =
+                                                    vk::CommandBufferLevel::ePrimary,
+                                                    .commandBufferCount =
+                                                    swapchainImagesCount };
 
-    auto commandBuffers = logicDev.allocateCommandBuffers( *commandBufferAI );
-
-    return commandBuffers;
+    return logicDev.allocateCommandBuffers( commandBufferAI );
 }
 
 [[nodiscard]] vk::SurfaceFormatKHR matchNeedFormatOrFirst(
 vk::PhysicalDevice gpu, vk::SurfaceKHR surface, vk::SurfaceFormatKHR format ) {
-    auto                 gpuSurfaceFormats = gpu.getSurfaceFormatsKHR( surface );
-    vk::SurfaceFormatKHR gpuSurfaceFormat;
+    auto gpuSurfaceFormats = gpu.getSurfaceFormatsKHR( surface );
     for ( auto && gpuSurfaceFormat : gpuSurfaceFormats )
         std::cout << vk::to_string( gpuSurfaceFormat.format ) << std::endl
                   << vk::to_string( gpuSurfaceFormat.colorSpace ) << std::endl;
 
     std::cout << std::endl;
 
+    vk::SurfaceFormatKHR gpuSurfaceFormat;
     if ( gpuSurfaceFormats.size() == 1 &&
          gpuSurfaceFormats.at( 0 ).format == vk::Format::eUndefined )
         gpuSurfaceFormat = vk::SurfaceFormatKHR { .format     = format.format,
@@ -62,13 +63,18 @@ vk::PhysicalDevice gpu, vk::SurfaceKHR surface, vk::SurfaceFormatKHR format ) {
                 gpuSurfaceFormat = gpuSF;
         }
 
-    if ( gpuSurfaceFormat.format != vk::Format::eB8G8R8A8Unorm )
+    if ( gpuSurfaceFormat.format != format.format )
         gpuSurfaceFormat = gpuSurfaceFormats.at( 0 );
 
     return gpuSurfaceFormat;
 }
 
-[[nodiscard]] vk::SwapchainKHR
+struct CreatedSwapchainInfo final {
+    vk::SwapchainKHR swapchain { VK_NULL_HANDLE };
+    vk::Extent2D     swapchainExtent {};
+};
+
+[[nodiscard]] CreatedSwapchainInfo
 swapchainInit( const vk::PhysicalDevice &          gpu,
                const vk::Device &                  logicDev,
                const vk::SurfaceKHR &              surface,
@@ -78,26 +84,29 @@ swapchainInit( const vk::PhysicalDevice &          gpu,
                vk::SwapchainKHR                    oldSwapchain ) {
     vk::PresentModeKHR presentMode = vk::PresentModeKHR::eFifo;
     for ( auto && pm : gpu.getSurfacePresentModesKHR( surface ) ) {
-        std::cout << vk::to_string( pm ) << std::endl;
+        //        std::cout << vk::to_string( pm ) << std::endl;
         if ( pm == vk::PresentModeKHR::eMailbox ) {
             presentMode = pm;
             break;
         }
     }
-    std::cout << "Present mode is " << vk::to_string( presentMode ) << std::endl;
 
-    //    std::cout << gpu.getSurfaceCapabilitiesKHR( surface ).currentExtent.height
-    //              << std::endl
-    //              << gpu.getSurfaceCapabilitiesKHR( surface ).currentExtent.width
-    //              << std::endl;
+    //    std::cout << "Present mode is " << vk::to_string( presentMode ) << std::endl;
+
+    //std::cout << "Min image count is "
+    //          << gpu.getSurfaceCapabilitiesKHR( surface ).minImageCount << std::endl;
+    //std::cout << "Max image count is "
+    //          << gpu.getSurfaceCapabilitiesKHR( surface ).maxImageCount << std::endl;
 
     vk::SwapchainCreateInfoKHR swapchainCI {
         //        .flags =
         //        vk::SwapchainCreateFlagBitsKHR::eMutableFormat,
         .surface       = surface,
-        .minImageCount = std::min< std::uint32_t >(
+        .minImageCount = std::max< std::uint32_t >(
+        std::min< std::uint32_t >(
         gpu.getSurfaceCapabilitiesKHR( surface ).maxImageCount,
         countSwapchainsOptimal ),
+        gpu.getSurfaceCapabilitiesKHR( surface ).minImageCount ),
         .imageFormat      = needFormat.format,
         .imageColorSpace  = needFormat.colorSpace,
         .imageExtent      = gpu.getSurfaceCapabilitiesKHR( surface ).currentExtent,
@@ -112,9 +121,12 @@ swapchainInit( const vk::PhysicalDevice &          gpu,
         .clipped      = VK_FALSE,
         .oldSwapchain = oldSwapchain
     };
-    vk::SwapchainKHR swapchain = logicDev.createSwapchainKHR( swapchainCI );
-    std::cout << std::endl << "Swapchain is created" << std::endl;
-    return swapchain;
+
+    //    std::cout << std::endl << "Swapchain is created" << std::endl;
+
+    return CreatedSwapchainInfo { .swapchain =
+                                  logicDev.createSwapchainKHR( swapchainCI ),
+                                  .swapchainExtent = swapchainCI.imageExtent };
 }
 
 [[nodiscard]] vk::PhysicalDevice getDiscreteGpu( const vk::Instance & instance ) {
@@ -217,111 +229,21 @@ void fillCmdBuffers [[maybe_unused]] ( QueueFamilyIndex    queueFamilyIndex,
     }
 }
 
-void fillCmdBuffersForPresentComposite
-[[maybe_unused]] ( QueueFamilyIndex                           queueFamilyIndex,
-                   CommandBuffersVec &                        commandBuffers,
-                   ImageVec &                                 swapchainImages,
-                   const vk::Image &                               srcImage,
-                   const std::vector< vk::ImageBlit > & regions /*,
-                   std::size_t                                imageDataSize*/ ) {
-    vk::CommandBufferBeginInfo cmdBufferBI {
-        .flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse
-    };
-
-    const std::array< const vk::ImageSubresourceRange, 1 > ranges {
-        vk::ImageSubresourceRange { .aspectMask   = vk::ImageAspectFlagBits::eColor,
-                                    .baseMipLevel = 0,
-                                    .levelCount   = 1,
-                                    .baseArrayLayer = 0,
-                                    .layerCount     = 1 }
-    };
-
-    auto imageMemoryBarierPresentToClear =
-    std::make_unique< vk::ImageMemoryBarrier >(
-    vk::ImageMemoryBarrier { .srcAccessMask = vk::AccessFlagBits::eTransferRead,
-                             .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
-                             .oldLayout     = vk::ImageLayout::eUndefined,
-                             .newLayout     = vk::ImageLayout::eTransferDstOptimal,
-                             .srcQueueFamilyIndex = queueFamilyIndex,
-                             .dstQueueFamilyIndex = queueFamilyIndex,
-                             .subresourceRange    = ranges.at( 0 ) } );
-
-    auto imageMemoryBarierClearToPresent =
-    std::make_unique< vk::ImageMemoryBarrier >(
-    vk::ImageMemoryBarrier { .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-                             .dstAccessMask = vk::AccessFlagBits::eMemoryWrite,
-                             .oldLayout     = vk::ImageLayout::eTransferDstOptimal,
-                             .newLayout     = vk::ImageLayout::ePresentSrcKHR,
-                             .srcQueueFamilyIndex = queueFamilyIndex,
-                             .dstQueueFamilyIndex = queueFamilyIndex,
-                             .subresourceRange    = ranges.at( 0 ) } );
-
-    const vk::ClearColorValue clearColorValue(
-    std::array< float, 4 > { 0.2f, 0.2f, 0.2f, 0.5f } );
-
-    for ( std::uint32_t i = 0; i < swapchainImages.size(); ++i ) {
-        imageMemoryBarierClearToPresent->image = swapchainImages.at( i );
-        imageMemoryBarierPresentToClear->image = swapchainImages.at( i );
-
-        commandBuffers.at( i ).begin( cmdBufferBI );
-
-        commandBuffers.at( i ).pipelineBarrier(
-        vk::PipelineStageFlagBits::eTransfer,
-        vk::PipelineStageFlagBits::eTransfer,
-        vk::DependencyFlags(),
-        {},
-        {},
-        { *imageMemoryBarierPresentToClear } );
-
-        commandBuffers.at( i ).clearColorImage( swapchainImages.at( i ),
-                                                vk::ImageLayout::eTransferDstOptimal,
-                                                clearColorValue,
-                                                ranges );
-
-        commandBuffers.at( i ).pipelineBarrier(
-        vk::PipelineStageFlagBits::eTransfer,
-        vk::PipelineStageFlagBits::eTransfer,
-        vk::DependencyFlags(),
-        {},
-        {},
-        { *imageMemoryBarierPresentToClear } );
-
-        commandBuffers.at( i ).blitImage( srcImage,
-                                          vk::ImageLayout::eTransferSrcOptimal,
-                                          swapchainImages.at( i ),
-                                          vk::ImageLayout::eSharedPresentKHR,
-                                          regions,
-                                          vk::Filter::eLinear );
-
-        commandBuffers.at( i ).pipelineBarrier(
-        vk::PipelineStageFlagBits::eTransfer,
-        vk::PipelineStageFlagBits::eBottomOfPipe,
-        vk::DependencyFlags(),
-        {},
-        {},
-        { *imageMemoryBarierClearToPresent } );
-
-        commandBuffers.at( i ).end();
-    }
-}
-
 std::vector< vk::ImageBlit >
 initImageBlitRegions( xcbwraper::WindowShared srcWindow,
                       xcbwraper::WindowShared dstWindow ) {
-    auto srcWindowGeometry = srcWindow->getProperties().getGeometry();
     vk::ArrayWrapper1D< vk::Offset3D, 2 > srcBound {
         { vk::Offset3D { .x = 0, .y = 0, .z = 0 },
-          vk::Offset3D { .x = srcWindowGeometry.rightBotPoint.x,
-                         .y = srcWindowGeometry.rightBotPoint.y,
-                         .z = 0 } }
+          vk::Offset3D { .x = srcWindow->getProperties().getGeometry().width,
+                         .y = srcWindow->getProperties().getGeometry().height,
+                         .z = 1 } }
     };
 
-    auto dstWindowGeometry = dstWindow->getProperties().getGeometry();
     vk::ArrayWrapper1D< vk::Offset3D, 2 > dstBound {
         { vk::Offset3D { .x = 0, .y = 0, .z = 0 },
-          vk::Offset3D { .x = dstWindowGeometry.rightBotPoint.x,
-                         .y = dstWindowGeometry.rightBotPoint.y,
-                         .z = 0 } }
+          vk::Offset3D { .x = dstWindow->getProperties().getGeometry().width,
+                         .y = dstWindow->getProperties().getGeometry().height,
+                         .z = 1 } }
     };
 
     vk::ImageSubresourceLayers srcSubresource { .aspectMask =
@@ -336,16 +258,159 @@ initImageBlitRegions( xcbwraper::WindowShared srcWindow,
                                                 .baseArrayLayer = 0,
                                                 .layerCount     = 1 };
 
-    std::vector< vk::ImageBlit > srcToDstRegions;
-    srcToDstRegions.push_back( vk::ImageBlit { .srcSubresource = srcSubresource,
-                                               .srcOffsets     = srcBound,
-                                               .dstSubresource = dstSubresource,
-                                               .dstOffsets     = dstBound } );
-    return srcToDstRegions;
+    return std::vector< vk::ImageBlit > { { vk::ImageBlit {
+    .srcSubresource = srcSubresource,
+    .srcOffsets     = srcBound,
+    .dstSubresource = dstSubresource,
+    .dstOffsets     = dstBound } } };
 }
+
+[[nodiscard]] std::vector< vk::BufferImageCopy > initBufferImageCopyRegions
+[[maybe_unused]] ( xcbwraper::WindowShared srcWindow ) {
+    vk::ImageSubresourceLayers srcSubresource { .aspectMask =
+                                                vk::ImageAspectFlagBits::eColor,
+                                                .mipLevel       = 0,
+                                                .baseArrayLayer = 0,
+                                                .layerCount     = 1 };
+
+    return std::vector< vk::BufferImageCopy > { { vk::BufferImageCopy {
+    .bufferOffset     = 0,
+    .imageSubresource = srcSubresource,
+    .imageOffset      = { 0, 0, 0 },
+    .imageExtent =
+    vk::Extent3D { .width  = srcWindow->getProperties().getGeometry().width,
+                   .height = srcWindow->getProperties().getGeometry().height,
+                   .depth  = 1 } } } };
+}
+
+void fillCmdBuffersForPresentComposite [[maybe_unused]] (
+QueueFamilyIndex                           queueFamilyIndex,
+CommandBuffersVec &                        commandBuffers,
+ImageVec &                                 swapchainImages,
+VulkanGraphicRender::CmdBufferInitConfig & cmdBufferConf,
+const vk::Buffer &                         srcBuffer,
+const vk::Image &                          srcImage,
+const std::vector< vk::ImageBlit > &       srcToDstBlitRegions,
+const std::vector< vk::BufferImageCopy > & srcBufferImgCopyRegions ) {
+    cmdBufferConf.srcImageInitMemoryBarier.srcQueueFamilyIndex = queueFamilyIndex;
+    cmdBufferConf.srcImageInitMemoryBarier.dstQueueFamilyIndex = queueFamilyIndex;
+    cmdBufferConf.srcImageInitMemoryBarier.image               = srcImage;
+    cmdBufferConf.srcImageInitMemoryBarier.subresourceRange =
+    cmdBufferConf.ranges.at( 0 );
+
+    cmdBufferConf.bufferImageCopyMemoryBarier.srcQueueFamilyIndex = queueFamilyIndex;
+    cmdBufferConf.bufferImageCopyMemoryBarier.dstQueueFamilyIndex = queueFamilyIndex;
+    cmdBufferConf.bufferImageCopyMemoryBarier.image               = srcImage;
+    cmdBufferConf.bufferImageCopyMemoryBarier.subresourceRange =
+    cmdBufferConf.ranges.at( 0 );
+
+    cmdBufferConf.imageMemoryBarierPresentToClear.srcQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.imageMemoryBarierPresentToClear.dstQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.imageMemoryBarierPresentToClear.subresourceRange =
+    cmdBufferConf.ranges.at( 0 );
+
+    cmdBufferConf.imageMemoryBarierClearToPresent.srcQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.imageMemoryBarierClearToPresent.dstQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.imageMemoryBarierClearToPresent.subresourceRange =
+    cmdBufferConf.ranges.at( 0 );
+
+    const vk::ClearColorValue clearColorValue(
+    std::array< float, 4 > { 0.5f, 0.5f, 0.5f, 1.0f } );
+
+    const std::array< const vk::ImageSubresourceRange, 1 > ranges {
+        vk::ImageSubresourceRange { .aspectMask   = vk::ImageAspectFlagBits::eColor,
+                                    .baseMipLevel = 0,
+                                    .levelCount   = 1,
+                                    .baseArrayLayer = 0,
+                                    .layerCount     = 1 }
+    };
+
+    for ( std::uint32_t i = 0; i < swapchainImages.size(); ++i ) {
+        cmdBufferConf.imageMemoryBarierClearToPresent.image =
+        swapchainImages.at( i );
+        cmdBufferConf.imageMemoryBarierPresentToClear.image =
+        swapchainImages.at( i );
+
+        commandBuffers.at( i ).begin( cmdBufferConf.cmdBufferBI );
+
+        commandBuffers.at( i ).pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::DependencyFlags(),
+        {},
+        {},
+        { cmdBufferConf.srcImageInitMemoryBarier,
+          cmdBufferConf.imageMemoryBarierPresentToClear } );
+
+        commandBuffers.at( i ).waitEvents( { cmdBufferConf.bufferImageCopied },
+                                           vk::PipelineStageFlagBits::eHost,
+                                           vk::PipelineStageFlagBits::eTransfer,
+                                           {},
+                                           {},
+                                           {} );
+
+        commandBuffers.at( i ).copyBufferToImage(
+        srcBuffer,
+        srcImage,
+        vk::ImageLayout::eTransferDstOptimal,
+        srcBufferImgCopyRegions );
+
+        commandBuffers.at( i ).resetEvent( cmdBufferConf.bufferImageCopied,
+                                           vk::PipelineStageFlagBits::eTransfer );
+
+        commandBuffers.at( i ).clearColorImage( swapchainImages.at( i ),
+                                                vk::ImageLayout::eTransferDstOptimal,
+                                                clearColorValue,
+                                                ranges );
+
+        commandBuffers.at( i ).pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::DependencyFlags(),
+        {},
+        {},
+        { cmdBufferConf.bufferImageCopyMemoryBarier,
+          cmdBufferConf.imageMemoryBarierPresentToClear } );
+
+        commandBuffers.at( i ).setEvent( cmdBufferConf.needRefrashExtent,
+                                         vk::PipelineStageFlagBits::eTransfer );
+
+        commandBuffers.at( i ).waitEvents( { cmdBufferConf.extentIsActual },
+                                           vk::PipelineStageFlagBits::eHost,
+                                           vk::PipelineStageFlagBits::eTransfer,
+                                           {},
+                                           {},
+                                           {} );
+
+        commandBuffers.at( i ).blitImage( srcImage,
+                                          vk::ImageLayout::eTransferSrcOptimal,
+                                          swapchainImages.at( i ),
+                                          vk::ImageLayout::eTransferDstOptimal,
+                                          srcToDstBlitRegions,
+                                          vk::Filter::eLinear );
+
+        commandBuffers.at( i ).resetEvent( cmdBufferConf.extentIsActual,
+                                           vk::PipelineStageFlagBits::eTransfer );
+
+        commandBuffers.at( i ).pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eBottomOfPipe,
+        vk::DependencyFlags(),
+        {},
+        {},
+        { cmdBufferConf.imageMemoryBarierClearToPresent } );
+
+        commandBuffers.at( i ).end();
+    }
+}
+
 }   // namespace
 
-VulkanBase::VulkanBase( CreateInfo && info ) :
+VulkanBase::VulkanBase( const CreateInfo & info ) :
 mInstance( info.instance ), mGpu( info.physDev ),
 mExtansions(
 info.extansions ) /* swapchainImages( info.swapchain == vk::SwapchainKHR()
@@ -357,20 +422,59 @@ queueConf( info.queueConf ) */
 VulkanBase::~VulkanBase() = default;
 
 VulkanGraphicRender::VulkanGraphicRender(
-VulkanBase::CreateInfo &&          baseInfo,
-VulkanGraphicRender::CreateInfo && graphicRenderCreateInfo ) :
-VulkanBase( std::move( baseInfo ) ),
+const VulkanBase::CreateInfo &          baseInfo,
+const VulkanGraphicRender::CreateInfo & graphicRenderCreateInfo ) :
+VulkanBase( baseInfo ),
 //mXcbConnect(  ),
 //xcbConnect( graphicRenderCreateInfo.xcbConnect ),
-mDstWindow( std::make_shared< xcbwraper::Window >(
-xcbwraper::Window::CreateInfo { .window = graphicRenderCreateInfo.xcbWindow } ) ) /*,
+mDstWindow( graphicRenderCreateInfo.xcbWindow ), /*
 mComposite( graphicRenderCreateInfo.xcbConnect )*/
-{
+mCurrentSwapchainExtentMutex( std::make_unique< std::mutex >() ),
+mDpy( XOpenDisplay( nullptr ) ) {
+    //    {
+    //        vk::XcbSurfaceCreateInfoKHR surfaceCI { .connection =
+    //                                                *graphicRenderCreateInfo.xcbConnect,
+    //                                                .window = *mDstWindow };
+    //        mSurface = mInstance.createXcbSurfaceKHR( surfaceCI );
+    //    }
+
     {
-        vk::XcbSurfaceCreateInfoKHR surfaceCI { .connection =
-                                                *graphicRenderCreateInfo.xcbConnect,
-                                                .window = *mDstWindow };
-        mSurface = mInstance.createXcbSurfaceKHR( surfaceCI );
+        auto dpysProps = mGpu.getDisplayPropertiesKHR();
+
+        std::cout << "Dysplays number is " << dpysProps.size() << std::endl
+                  << std::endl;
+
+        for ( auto && dpyProp : dpysProps ) {
+            std::cout << "Display name is " << dpyProp.displayName << std::endl
+                      << "Display resolution is " << dpyProp.physicalResolution.width
+                      << "x" << dpyProp.physicalResolution.width << std::endl;
+        }
+
+        std::cout << "Display supported transforms is " << vk::to_string(dpysProps.at(0).supportedTransforms )<<std::endl;
+
+        auto dpy0          = dpysProps.at( 0 ).display;
+        auto dpy0ModeProps = mGpu.getDisplayModePropertiesKHR( dpy0 );
+
+        for ( auto && dpy0ModeProp : dpy0ModeProps )
+            std::cout << "Mode " << dpy0ModeProp.parameters.visibleRegion.width
+                      << "x" << dpy0ModeProp.parameters.visibleRegion.height << " "
+                      << dpy0ModeProp.parameters.refreshRate << std::endl;
+
+        //if ( mGpu.acquireXlibDisplayEXT( mDpy, dpy0 ) != vk::Result::eSuccess )
+        //    throw std::runtime_error( "Display is not allowed" );
+
+        vk::DisplaySurfaceCreateInfoKHR displaySurfaceCI {
+            .flags           = {},
+            .displayMode     = dpy0ModeProps.at( 0 ).displayMode,
+            .planeIndex      = 0,
+            .planeStackIndex = 0,
+            .transform       = vk::SurfaceTransformFlagBitsKHR::eIdentity,
+            .globalAlpha     = 0.5f,
+            .alphaMode       = vk::DisplayPlaneAlphaFlagBitsKHR::eOpaque,
+            .imageExtent     = vk::Extent2D { .width = 1080, .height = 1920 }
+        };
+
+        mSurface = mInstance.createDisplayPlaneSurfaceKHR( displaySurfaceCI );
     }
 
     mGpu = getDiscreteGpu( mInstance );
@@ -422,61 +526,69 @@ mComposite( graphicRenderCreateInfo.xcbConnect )*/
         mSurfaceFormat = matchNeedFormatOrFirst( mGpu, mSurface, needFormat );
     }
 
-    mSwapchain = swapchainInit( mGpu,
-                                mLogicDev,
-                                mSurface,
-                                mQueueConfigs.at( 0 ),
-                                countSwapChainBuffers,
-                                mSurfaceFormat,
-                                {} );
+    std::cout << "TEST" << std::endl;
+    auto [ swapchain, currentSwapchainExtent ] =
+    swapchainInit( mGpu,
+                   mLogicDev,
+                   mSurface,
+                   mQueueConfigs.at( 0 ),
+                   countSwapChainBuffers,
+                   mSurfaceFormat,
+                   {} );
+    mSwapchain              = swapchain;
+    mCurrentSwapchainExtent = currentSwapchainExtent;
 
     mSwapchainImages = mLogicDev.getSwapchainImagesKHR( mSwapchain );
 
     mSwapchainCmdBuffers =
     commandBuffersInit( mLogicDev, mCommandPool, mSwapchainImages.size() );
 
-    //    fillCmdBuffers(
-    //    mQueueConfigs.at( 0 ).queueFamilyIndex, mSwapchainCmdBuffers, mSwapchainImages );
+    mSemaphores.push_back( mLogicDev.createSemaphore( {} ) );
+    mSemaphores.push_back( mLogicDev.createSemaphore( {} ) );
 
-    mSemaphores.push_back( mLogicDev.createSemaphore( {} ) );
-    mSemaphores.push_back( mLogicDev.createSemaphore( {} ) );
+    //    {
+    //        xcbwraper::AtomNetClientList clientList {};
+    //        auto                         clientsVec = clientList.get();
+    //
+    //        for ( auto && client : clientsVec )
+    //            std::cout << "TEST POINT " << client.getID() << std::endl
+    //                      << client.getClass() << std::endl
+    //                      << std::endl;
+    //        xcbwraper::XcbConnectionShared connection =
+    //        std::make_shared< xcbwraper::XCBConnection >();
+    //        xcbwraper::Window::CreateInfo windowCI { .connection = connection };
+    //
+    //        constexpr std::string_view searchWindowClass( "keepassxc" );
+    //
+    //        for ( auto && client : clientsVec )
+    //            if ( client.getClass() == searchWindowClass )
+    //                windowCI.window = client.getID();
+    //        mSrcRamInfo.window = std::make_shared< xcbwraper::Window >( windowCI );
 
     {
-        xcbwraper::AtomNetClientList clientList {};
-        auto                         clientsVec = clientList.get();
-
-        for ( auto && client : clientsVec )
-            std::cout << "TEST POINT " << client.getID() << std::endl
-                      << client.getClass() << std::endl
-                      << std::endl;
-        xcbwraper::XcbConnectionShared connection =
-        std::make_shared< xcbwraper::XCBConnection >();
-        xcbwraper::Window::CreateInfo windowCI { .connection = connection };
-
-        constexpr std::string_view searchWindowClass( "Watcher" );
-
-        for ( auto && client : clientsVec )
-            if ( client.getClass() == searchWindowClass )
-                windowCI.window = client.getID();
-
-        mSrcWindow = std::make_shared< xcbwraper::Window >( windowCI );
-        if ( !mSrcWindow->getProperties().isViewable() )
+        composite::Composite srcComposite( graphicRenderCreateInfo.xcbConnect );
+        mSrcRamInfo.window = srcComposite.getRootWindow();
+        if ( !mSrcRamInfo.window->getProperties().isViewable() )
             throw std::runtime_error( "Selected overlay window id not viewvable" );
-        std::cout << "Selected window: " << mSrcWindow->getProperties().getClass()
-                  << std::endl
-                  << "with id: " << mSrcWindow->getProperties().getID() << std::endl;
+        std::cout << "Selected window: "
+                  << mSrcRamInfo.window->getProperties().getClass() << std::endl
+                  << "with id: " << mSrcRamInfo.window->getProperties().getID()
+                  << std::endl;
     }
 
     {
-        mSrcToDstRegions = initImageBlitRegions( mSrcWindow, mDstWindow );
+        //        mSrcToDstRegions = initImageBlitRegions( mSrcRamInfo.window, mDstWindow );
 
-        auto bitPerRgb = mSrcWindow->getProperties().getBitPerRGB() * 3;
+        auto bitPerRgb = mSrcRamInfo.window->getProperties().getBitPerRGB() * 3;
         std::cout << "Overlay Window has "
                   << static_cast< std::uint32_t >( bitPerRgb ) << " bit per rgb."
                   << std::endl;
 
-        auto srcWindowGeometry = mSrcWindow->getProperties().getGeometry();
-        auto srcImageCI        = vk::ImageCreateInfo {
+        auto srcWindowGeometry = mSrcRamInfo.window->getProperties().getGeometry();
+
+        mSrcBufferImgCopyRegions = initBufferImageCopyRegions( mSrcRamInfo.window );
+
+        auto srcImageCI = vk::ImageCreateInfo {
             .flags       = {},
             .imageType   = vk::ImageType::e2D,
             .format      = mSurfaceFormat.format,
@@ -485,17 +597,82 @@ mComposite( graphicRenderCreateInfo.xcbConnect )*/
                                      .depth  = 1 },
             .mipLevels   = 1,
             .arrayLayers = 1,
-            .samples     = vk::SampleCountFlagBits::e1,
             .tiling      = vk::ImageTiling::eOptimal,
             .usage       = vk::ImageUsageFlagBits::eTransferDst |
-                     vk::ImageUsageFlagBits::eTransferSrc |
-                     vk::ImageUsageFlagBits::eSampled,
+                     vk::ImageUsageFlagBits::eTransferSrc,
             .sharingMode           = vk::SharingMode::eExclusive,
             .queueFamilyIndexCount = 1,
             .pQueueFamilyIndices   = &mQueueConfigs.at( 0 ).queueFamilyIndex,
             .initialLayout         = vk::ImageLayout::eUndefined
         };
-        mSrcImage = mLogicDev.createImage( srcImageCI );
+        mSrcRamInfo.image = mLogicDev.createImage( srcImageCI );
+
+        const vk::DeviceSize bufferSize =
+        srcWindowGeometry.height * srcWindowGeometry.width * bitPerRgb;
+
+        const vk::BufferUsageFlags bufferUsageFlags {
+            vk::BufferUsageFlagBits::eTransferDst |
+            vk::BufferUsageFlagBits::eTransferSrc
+        };
+
+        vk::BufferCreateInfo srcBufferCI { .size  = bufferSize,
+                                           .usage = bufferUsageFlags,
+                                           .sharingMode =
+                                           vk::SharingMode::eExclusive,
+                                           .queueFamilyIndexCount = 1,
+                                           .pQueueFamilyIndices =
+                                           &mQueueConfigs.at( 0 ).queueFamilyIndex };
+        mSrcRamInfo.imageBuffer = mLogicDev.createBuffer( srcBufferCI );
+    }
+
+    {
+        constexpr vk::MemoryPropertyFlags memReqFlags {
+            vk::MemoryPropertyFlagBits::eDeviceLocal
+        };
+
+        const auto memRequarements =
+        mLogicDev.getImageMemoryRequirements( mSrcRamInfo.image );
+        const auto memTypeBitsRequarements = memRequarements.memoryTypeBits;
+
+        const auto gpuMemPropArr = mGpu.getMemoryProperties().memoryTypes;
+        const auto countMemProps = mGpu.getMemoryProperties().memoryTypeCount;
+
+        std::cout << "Image Mem types arr size is : " << gpuMemPropArr.size()
+                  << std::endl
+                  << "Image Mem types count is : "
+                  << mGpu.getMemoryProperties().memoryTypeCount << std::endl;
+
+        std::cout << "Image Mem requarements flags is : "
+                  << vk::to_string( memReqFlags ) << std::endl
+                  << "Image Mem type bits req is : " << memTypeBitsRequarements
+                  << std::endl
+                  << std::endl;
+
+        std::uint32_t                                 memTypeIndex = 0;
+        constexpr decltype( memTypeBitsRequarements ) memTypeBit   = 1;
+        for ( ; memTypeIndex < countMemProps &&
+                !( static_cast< bool >(
+                   gpuMemPropArr.at( memTypeIndex ).propertyFlags & memReqFlags ) &&
+                   static_cast< bool >( memTypeBitsRequarements &
+                                        ( memTypeBit << memTypeIndex ) ) );
+              ++memTypeIndex )
+            ;
+
+        std::cout << "Property flags is : "
+                  << vk::to_string( gpuMemPropArr.at( memTypeIndex ).propertyFlags )
+                  << std::endl
+                  << "Type bit is : " << ( memTypeBit << memTypeIndex ) << std::endl
+                  << std::endl;
+
+        if ( memTypeIndex == countMemProps )
+            throw std::runtime_error(
+            "In Render constructor Requared memory index not found!" );
+
+        vk::MemoryAllocateInfo memAllocInfo { .allocationSize = memRequarements.size,
+                                              .memoryTypeIndex = memTypeIndex };
+        mSrcRamInfo.imageRam = mLogicDev.allocateMemory( memAllocInfo );
+
+        mLogicDev.bindImageMemory( mSrcRamInfo.image, mSrcRamInfo.imageRam, 0 );
     }
 
     {
@@ -504,7 +681,7 @@ mComposite( graphicRenderCreateInfo.xcbConnect )*/
         };
 
         const auto memRequarements =
-        mLogicDev.getImageMemoryRequirements( mSrcImage );
+        mLogicDev.getBufferMemoryRequirements( mSrcRamInfo.imageBuffer );
         const auto memTypeBitsRequarements = memRequarements.memoryTypeBits;
 
         const auto gpuMemPropArr = mGpu.getMemoryProperties().memoryTypes;
@@ -528,13 +705,13 @@ mComposite( graphicRenderCreateInfo.xcbConnect )*/
                    static_cast< bool >( memTypeBitsRequarements &
                                         ( memTypeBit << memTypeIndex ) ) );
               ++memTypeIndex )
-            std::cout << "Property flags is : "
-                      << vk::to_string(
-                         gpuMemPropArr.at( memTypeIndex ).propertyFlags )
-                      << std::endl
-                      << "Type bit is : " << ( memTypeBit << memTypeIndex )
-                      << std::endl
-                      << std::endl;
+            ;
+
+        std::cout << "Property flags is : "
+                  << vk::to_string( gpuMemPropArr.at( memTypeIndex ).propertyFlags )
+                  << std::endl
+                  << "Type bit is : " << ( memTypeBit << memTypeIndex ) << std::endl
+                  << std::endl;
 
         if ( memTypeIndex == countMemProps )
             throw std::runtime_error(
@@ -542,16 +719,78 @@ mComposite( graphicRenderCreateInfo.xcbConnect )*/
 
         vk::MemoryAllocateInfo memAllocInfo { .allocationSize = memRequarements.size,
                                               .memoryTypeIndex = memTypeIndex };
-        mSrcRawImage = mLogicDev.allocateMemory( memAllocInfo );
+        mSrcRamInfo.imageBufferRam = mLogicDev.allocateMemory( memAllocInfo );
 
-        mLogicDev.bindImageMemory( mSrcImage, mSrcRawImage, 0 );
+        mLogicDev.bindBufferMemory(
+        mSrcRamInfo.imageBuffer, mSrcRamInfo.imageBufferRam, 0 );
+
+        mSrcRamInfo.imageDataBridge =
+        mLogicDev.mapMemory( mSrcRamInfo.imageBufferRam, 0, memRequarements.size );
+        //
+        //        mLogicDev.unmapMemory( mSrcRamInfo.imageBufferRam );
     }
 
-    //    fillCmdBuffersForPresentComposite( mQueueConfigs.at( 0 ).queueFamilyIndex,
-    //                                       mSwapchainCmdBuffers,
-    //                                       mSwapchainImages,
-    //                                       mSrcImageBuffer,
-    //                                       mSrcToDstRegions );
+    mSrcToDstBlitRegions = initImageBlitRegions( mSrcRamInfo.window, mDstWindow );
+
+    auto & blitRegion0DstOffset1 = mSrcToDstBlitRegions.at( 0 ).dstOffsets.at( 1 );
+    auto   surfaceExtents = mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent;
+    blitRegion0DstOffset1.x = surfaceExtents.width;
+    blitRegion0DstOffset1.y = surfaceExtents.height;
+
+    mSrcRamInfo.imageShm = std::make_shared< posix::SharedMemory >();
+
+    vk::EventCreateInfo eventCI { .flags = {} };
+
+    mCmdConfig.bufferImageCopied = mLogicDev.createEvent( eventCI );
+    mCmdConfig.extentIsActual    = mLogicDev.createEvent( eventCI );
+    mCmdConfig.needRefrashExtent = mLogicDev.createEvent( eventCI );
+
+    mThreadPool.blitRegionsResizer = std::thread( [ this ]() {
+        auto & blitRegion0DstOffset1 =
+        mSrcToDstBlitRegions.at( 0 ).dstOffsets.at( 1 );
+
+        while ( true ) {
+            while ( mLogicDev.getEventStatus( mCmdConfig.needRefrashExtent ) ==
+                    vk::Result::eEventReset ) {
+                using namespace std::chrono_literals;
+                std::this_thread::sleep_for( 100us );
+            }
+
+            mCurrentSurfaceExtent =
+            mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent;
+
+            {
+                const std::scoped_lock< std::mutex > lockSwapchainExtent(
+                *mCurrentSwapchainExtentMutex );
+
+                blitRegion0DstOffset1.y = std::min( mCurrentSurfaceExtent.height,
+                                                    mCurrentSwapchainExtent.height );
+
+                blitRegion0DstOffset1.x = std::min( mCurrentSurfaceExtent.width,
+                                                    mCurrentSwapchainExtent.width );
+
+                mLogicDev.setEvent( mCmdConfig.extentIsActual );
+
+                mLogicDev.resetEvent( mCmdConfig.needRefrashExtent );
+
+                mCurrentSwapchainExtent = mCurrentSurfaceExtent;
+            }
+            //            using namespace std::chrono_literals;
+            //            std::this_thread::sleep_for( 100us );
+        }
+    } );
+
+    mThreadPool.blitRegionsResizer.detach();
+
+    fillCmdBuffersForPresentComposite( mQueueConfigs.at( 0 ).queueFamilyIndex,
+                                       mSwapchainCmdBuffers,
+                                       mSwapchainImages,
+                                       mCmdConfig,
+                                       mSrcRamInfo.imageBuffer,
+                                       mSrcRamInfo.image,
+                                       mSrcToDstBlitRegions,
+                                       mSrcBufferImgCopyRegions );
+
     std::cout << std::endl
               << "Command buffer count :" << mSwapchainCmdBuffers.size()
               << std::endl;
@@ -559,104 +798,116 @@ mComposite( graphicRenderCreateInfo.xcbConnect )*/
               << "Image count : " << mSwapchainImages.size() << std::endl;
 }
 
-VulkanGraphicRender::~VulkanGraphicRender() {
-    //mLogicDev.waitIdle();
-    //mLogicDev.freeMemory( mSrcRawImage );
-}
+VulkanGraphicRender::~VulkanGraphicRender() {}
 
 void VulkanGraphicRender::draw() {
     try {
-        auto memRequarements = mLogicDev.getImageMemoryRequirements( mSrcImage );
-
-        auto imageDataVec = mSrcWindow->getImageData();
-        //std::cout << "Image size: " << imageDataVec.size() << std::endl;
-        //std::cout << "Mem req size: " << memRequarements.size << std::endl;
-        auto srcBufferData =
-        mLogicDev.mapMemory( mSrcRawImage, 0, memRequarements.size );
-        std::copy( imageDataVec.begin(),
-                   imageDataVec.end(),
-                   static_cast< std::uint8_t * >( srcBufferData ) );
-        mLogicDev.unmapMemory( mSrcRawImage );
-
-        for ( auto cmdBuffer : mSwapchainCmdBuffers )
-            cmdBuffer.reset();
-
         mLogicDev.waitIdle();
 
-        mSrcToDstRegions = initImageBlitRegions( mSrcWindow, mDstWindow );
+        constexpr std::uint64_t waitTimeNanoSeconds = 10;
+        const auto              asqNextImgIndex     = mLogicDev.acquireNextImageKHR(
+        mSwapchain, waitTimeNanoSeconds, mSemaphores.at( 0 ) );
 
-        fillCmdBuffersForPresentComposite( mQueueConfigs.at( 0 ).queueFamilyIndex,
-                                           mSwapchainCmdBuffers,
-                                           mSwapchainImages,
-                                           mSrcImage,
-                                           mSrcToDstRegions );
+        if ( asqNextImgIndex.result != vk::Result::eSuccess )
+            std::cout << std::endl << "TEST" << std::endl;
 
-    } catch ( const std::runtime_error & err ) { std::cout << err.what(); }
+        auto & subInfo0 = mDrawConf.subInfo.at( 0 );
 
-    const auto asqNextImgIndex = mLogicDev.acquireNextImageKHR(
-    mSwapchain, std::numeric_limits< std::uint64_t >::max(), mSemaphores.at( 0 ) );
+        subInfo0.pWaitSemaphores   = &mSemaphores.at( 0 );
+        subInfo0.pWaitDstStageMask = mDrawConf.pipelineStageFlags.data();
+        subInfo0.pCommandBuffers = &mSwapchainCmdBuffers.at( asqNextImgIndex.value );
+        subInfo0.pSignalSemaphores = &mSemaphores.at( 1 );
 
-    const std::array< const vk::Flags< vk::PipelineStageFlagBits >, 1 >
-    pipelineStageFlags { vk::PipelineStageFlagBits::eTransfer };
+        //        mLogicDev.resetEvent( mCmdConfig.bufferImageCopied );
 
-    const std::array< const vk::SubmitInfo, 1 > subInfo { vk::SubmitInfo {
-    .waitSemaphoreCount   = 1,
-    .pWaitSemaphores      = &mSemaphores.at( 0 ),
-    .pWaitDstStageMask    = pipelineStageFlags.data(),
-    .commandBufferCount   = 1,
-    .pCommandBuffers      = &mSwapchainCmdBuffers.at( asqNextImgIndex.value ),
-    .signalSemaphoreCount = 1,
-    .pSignalSemaphores    = &mSemaphores.at( 1 ) } };
+        auto & queue0 = mQueues.at( 0 );
+        queue0.submit( mDrawConf.subInfo );
 
-    mLogicDev.waitIdle();
-    mQueues.at( 0 ).submit( subInfo );
-    //       std::cout << "Submit is success" << std::endl;
+        {
+            mSrcRamInfo.imageShm =
+            mSrcRamInfo.window->getImageData( mSrcRamInfo.imageShm );
 
-    vk::PresentInfoKHR present { .waitSemaphoreCount = 1,
-                                 .pWaitSemaphores    = &mSemaphores.at( 1 ),
-                                 .swapchainCount     = 1,
-                                 .pSwapchains        = &mSwapchain,
-                                 .pImageIndices      = &asqNextImgIndex.value };
+            std::copy(
+            mSrcRamInfo.imageShm->getData< std::uint8_t >().begin(),
+            mSrcRamInfo.imageShm->getData< std::uint8_t >().end(),
+            static_cast< std::uint8_t * >( mSrcRamInfo.imageDataBridge ) );
+        }
 
-    try {
-        [[maybe_unused]] auto result = mQueues.at( 0 ).presentKHR( present );
+        mLogicDev.setEvent( mCmdConfig.bufferImageCopied );
+
+        //        while ( mLogicDev.getEventStatus( mCmdConfig.needRefrashExtent ) ==
+        //                vk::Result::eEventReset ) {
+        //            //using namespace std::chrono_literals;
+        //            //std::this_thread::sleep_for( 100us );
+        //        }
+        //
+        //        mLogicDev.setEvent( mCmdConfig.extentIsActual );
+        //
+        //        mLogicDev.resetEvent( mCmdConfig.needRefrashExtent );
+
+        //mCurrentSwapchainExtent = mCurrentSurfaceExtent;
+
+        mDrawConf.present.pWaitSemaphores = &mSemaphores.at( 1 );
+        mDrawConf.present.pSwapchains     = &mSwapchain;
+        mDrawConf.present.pImageIndices   = &asqNextImgIndex.value;
+
+        queue0.waitIdle();
+
+        [[maybe_unused]] auto result = queue0.presentKHR( mDrawConf.present );
+
     } catch ( const vk::OutOfDateKHRError & e ) {
         update();
+
+        mLogicDev.resetEvent( mCmdConfig.extentIsActual );
+
         std::cout << e.what() << std::endl;
-    }
+    } /* catch (...) {std::cout << std::endl << "TEST" << std::endl;
+    update();} */
 }
 
 void VulkanGraphicRender::update() {
     mLogicDev.waitIdle();
 
-    mSwapchain = swapchainInit( mGpu,
-                                mLogicDev,
-                                mSurface,
-                                mQueueConfigs.at( 0 ),
-                                countSwapChainBuffers,
-                                mSurfaceFormat,
-                                mSwapchain );
+    {
+        const std::scoped_lock< std::mutex > lockSwapchainExtent(
+        *mCurrentSwapchainExtentMutex );
+
+        auto [ swapchain, currentSwapchainExtent ] =
+        swapchainInit( mGpu,
+                       mLogicDev,
+                       mSurface,
+                       mQueueConfigs.at( 0 ),
+                       countSwapChainBuffers,
+                       mSurfaceFormat,
+                       mSwapchain );
+        mSwapchain              = swapchain;
+        mCurrentSwapchainExtent = currentSwapchainExtent;
+    }
 
     mSwapchainImages = mLogicDev.getSwapchainImagesKHR( mSwapchain );
 
     for ( auto cmdBuffer : mSwapchainCmdBuffers )
         cmdBuffer.reset();
 
-    mSrcToDstRegions = initImageBlitRegions( mSrcWindow, mDstWindow );
+    //    blitRegion0DstOffset1.y =
+    //    mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.height;
+    //    blitRegion0DstOffset1.x =
+    //    mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.width;
+
     fillCmdBuffersForPresentComposite( mQueueConfigs.at( 0 ).queueFamilyIndex,
                                        mSwapchainCmdBuffers,
                                        mSwapchainImages,
-                                       mSrcImage,
-                                       mSrcToDstRegions );
-
-    //    fillCmdBuffers(
-    //    mQueueConfigs.at( 0 ).queueFamilyIndex, mSwapchainCmdBuffers, mSwapchainImages );
+                                       mCmdConfig,
+                                       mSrcRamInfo.imageBuffer,
+                                       mSrcRamInfo.image,
+                                       mSrcToDstBlitRegions,
+                                       mSrcBufferImgCopyRegions );
 }
 
 void VulkanGraphicRender::printSurfaceExtents() const {
-    std::cout << mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.width
+    std::cout << mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.height
               << "X"
-              << mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.height
+              << mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.width
               << std::endl
               << std::endl;
 }
@@ -668,25 +919,25 @@ template < class Renderer > concept HasDrawMethod = requires( Renderer renderer 
 };
 
 template < HasDrawMethod Renderer >
-void runRenderLoop( Renderer renderer, xcbwraper::XcbConnectionShared xcbConnect ) {
+void runRenderLoop( std::unique_ptr< Renderer >    renderer,
+                    xcbwraper::XcbConnectionShared xcbConnect ) {
     for ( bool breakLoop = false; !breakLoop; ) {
-        renderer.draw();
-        auto event =
-        xcb_poll_for_event( static_cast< xcb_connection_t * >( *xcbConnect ) );
+        renderer->draw();
+
+        std::unique_ptr< xcb_generic_event_t > event { xcb_poll_for_event(
+        static_cast< xcb_connection_t * >( *xcbConnect ) ) };
+
         if ( !event )
             continue;
-        //for ( auto event = xcb_poll_for_event( xcbConnect ); event != nullptr;
-        //      event      = xcb_poll_for_event( xcbConnect ) ) {
-        switch ( event->response_type & ~0x80 ) {
-            //case XCB_EXPOSE: renderer.draw(); break;
 
+        switch ( event->response_type & ~0x80 ) {
         case XCB_KEY_PRESS:
-            if ( reinterpret_cast< xcb_key_press_event_t * >( event )->detail ==
-                 24 ) {
+            if ( reinterpret_cast< xcb_key_press_event_t * >( event.get() )
+                 ->detail == 24 ) {
                 breakLoop = true;
             }
         }
-        delete event;
+        //        delete event;
     }
 }
 }   // namespace
@@ -755,31 +1006,42 @@ void VulkanRenderInstance::run() const {
                           .applicationVersion = VK_MAKE_VERSION( 0, 0, 1 ),
                           .pEngineName        = "vulkan_xcb_engine",
                           .engineVersion      = VK_MAKE_VERSION( 0, 0, 1 ),
-                          .apiVersion         = VK_API_VERSION_1_0 } );
+                          .apiVersion         = VK_API_VERSION_1_2 } );
 
     VulkanBase::Extensions extensions {
         .instance = { VK_KHR_SURFACE_EXTENSION_NAME,
-                      VK_KHR_XCB_SURFACE_EXTENSION_NAME },
+//                      VK_KHR_XCB_SURFACE_EXTENSION_NAME,
+                      VK_KHR_DISPLAY_EXTENSION_NAME,
+                      VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME,
+                      VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME },
         .device   = { VK_KHR_SWAPCHAIN_EXTENSION_NAME }
     };
+
     vk::Instance vulkanXCBInstance = vk::createInstance( vk::InstanceCreateInfo {
     .pApplicationInfo = appInfo.get(),
     .enabledExtensionCount =
     static_cast< std::uint32_t >( extensions.instance.size() ),
     .ppEnabledExtensionNames = extensions.instance.data() } );
 
-    auto                            gpu = getDiscreteGpu( vulkanXCBInstance );
-    VulkanBase::CreateInfo          vulkanBaseCI { .instance   = vulkanXCBInstance,
+    auto                   gpu = getDiscreteGpu( vulkanXCBInstance );
+    VulkanBase::CreateInfo vulkanBaseCI { .instance   = vulkanXCBInstance,
                                           .physDev    = gpu,
                                           .extansions = extensions };
+
+    auto windowPtr = std::make_shared< xcbwraper::Window >(
+    xcbwraper::Window::CreateInfo { mXcbConnect, window } );
+
     VulkanGraphicRender::CreateInfo vulkanRenderCI { .xcbConnect = mXcbConnect,
-                                                     .xcbWindow  = window };
+                                                     .xcbWindow  = windowPtr };
 
-    VulkanGraphicRender renderer( std::move( vulkanBaseCI ),
-                                  std::move( vulkanRenderCI ) );
-    runRenderLoop< VulkanGraphicRender >( renderer, mXcbConnect );
+    //    auto renderer =
+    //    std::make_unique< VulkanGraphicRender >( vulkanBaseCI, vulkanRenderCI );
 
-    xcb_destroy_window( static_cast< xcb_connection_t * >( *mXcbConnect ), window );
-    xcb_flush( static_cast< xcb_connection_t * >( *mXcbConnect ) );
+    runRenderLoop< VulkanGraphicRender >(
+    std::make_unique< VulkanGraphicRender >( vulkanBaseCI, vulkanRenderCI ),
+    mXcbConnect );
+
+    //    xcb_destroy_window( static_cast< xcb_connection_t * >( *mXcbConnect ), window );
+    //    xcb_flush( static_cast< xcb_connection_t * >( *mXcbConnect ) );
 }
 }   // namespace core::renderer
