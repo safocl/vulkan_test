@@ -6,6 +6,7 @@
 #include "xcbwraper/xcbinternatom.hpp"
 
 #include <X11/Xlib.h>
+#include <bits/c++config.h>
 #include <chrono>
 #include <mutex>
 #include <thread>
@@ -116,7 +117,7 @@ swapchainInit( const vk::PhysicalDevice &          gpu,
                       vk::ImageUsageFlagBits::eTransferSrc,
         .imageSharingMode      = vk::SharingMode::eExclusive,
         .queueFamilyIndexCount = queueConf.queueFamilyIndex,
-        .preTransform = gpu.getSurfaceCapabilitiesKHR( surface ).currentTransform,
+//        .preTransform = gpu.getSurfaceCapabilitiesKHR( surface ).currentTransform,
         .presentMode  = presentMode,
         .clipped      = VK_FALSE,
         .oldSwapchain = oldSwapchain
@@ -438,6 +439,10 @@ mDpy( XOpenDisplay( nullptr ) ) {
     //        mSurface = mInstance.createXcbSurfaceKHR( surfaceCI );
     //    }
 
+    //    mGpu = getDiscreteGpu( mInstance );
+    std::cout << "Discrete GPU is : " << mGpu.getProperties().deviceName << std::endl
+              << std::endl;
+
     {
         auto dpysProps = mGpu.getDisplayPropertiesKHR();
 
@@ -447,12 +452,40 @@ mDpy( XOpenDisplay( nullptr ) ) {
         for ( auto && dpyProp : dpysProps ) {
             std::cout << "Display name is " << dpyProp.displayName << std::endl
                       << "Display resolution is " << dpyProp.physicalResolution.width
-                      << "x" << dpyProp.physicalResolution.width << std::endl;
+                      << "x" << dpyProp.physicalResolution.height << std::endl;
         }
 
-        std::cout << "Display supported transforms is " << vk::to_string(dpysProps.at(0).supportedTransforms )<<std::endl;
+        std::cout << "Display supported transforms is "
+                  << vk::to_string( dpysProps.at( 0 ).supportedTransforms )
+                  << std::endl;
 
-        auto dpy0          = dpysProps.at( 0 ).display;
+        auto planesProps = mGpu.getDisplayPlanePropertiesKHR();
+
+        std::cout << "Planes count is " << planesProps.size() << std::endl;
+
+        std::cout << std::endl;
+
+        auto dpy0 = dpysProps.at( 0 ).display;
+
+        std::uint32_t stackIndex {};
+        std::uint32_t planeIndex {};
+        for ( ; planeIndex < planesProps.size(); ++planeIndex ) {
+            if ( planesProps.at( planeIndex ).currentDisplay == dpy0 ) {
+                std::cout << planesProps.at( planeIndex ).currentStackIndex
+                          << std::endl;
+                stackIndex = planesProps.at( planeIndex ).currentStackIndex;
+                break;
+            }
+        }
+
+        //if (planeIndex >= planesProps.size())
+        //    throw std::runtime_error("Plane is not found!!!");
+
+        std::cout << std::endl;
+
+        std::cout << "Plane index is " << planeIndex << std::endl << std::endl;
+        std::cout << "Plane stack index is " << stackIndex << std::endl << std::endl;
+
         auto dpy0ModeProps = mGpu.getDisplayModePropertiesKHR( dpy0 );
 
         for ( auto && dpy0ModeProp : dpy0ModeProps )
@@ -466,20 +499,16 @@ mDpy( XOpenDisplay( nullptr ) ) {
         vk::DisplaySurfaceCreateInfoKHR displaySurfaceCI {
             .flags           = {},
             .displayMode     = dpy0ModeProps.at( 0 ).displayMode,
-            .planeIndex      = 0,
-            .planeStackIndex = 0,
+            .planeIndex      = planeIndex,
+            .planeStackIndex = 8,
             .transform       = vk::SurfaceTransformFlagBitsKHR::eIdentity,
             .globalAlpha     = 0.5f,
-            .alphaMode       = vk::DisplayPlaneAlphaFlagBitsKHR::eOpaque,
-            .imageExtent     = vk::Extent2D { .width = 1080, .height = 1920 }
+            .alphaMode       = vk::DisplayPlaneAlphaFlagBitsKHR::eGlobal,
+            .imageExtent     = dpysProps.at( 0 ).physicalResolution
         };
 
         mSurface = mInstance.createDisplayPlaneSurfaceKHR( displaySurfaceCI );
     }
-
-    mGpu = getDiscreteGpu( mInstance );
-    std::cout << "Discrete GPU is : " << mGpu.getProperties().deviceName << std::endl
-              << std::endl;
 
     printSurfaceExtents();
 
@@ -905,9 +934,9 @@ void VulkanGraphicRender::update() {
 }
 
 void VulkanGraphicRender::printSurfaceExtents() const {
-    std::cout << mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.height
+    std::cout << mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.width
               << "X"
-              << mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.width
+              << mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.height
               << std::endl
               << std::endl;
 }
@@ -1010,7 +1039,7 @@ void VulkanRenderInstance::run() const {
 
     VulkanBase::Extensions extensions {
         .instance = { VK_KHR_SURFACE_EXTENSION_NAME,
-//                      VK_KHR_XCB_SURFACE_EXTENSION_NAME,
+                      //                      VK_KHR_XCB_SURFACE_EXTENSION_NAME,
                       VK_KHR_DISPLAY_EXTENSION_NAME,
                       VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME,
                       VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME },
