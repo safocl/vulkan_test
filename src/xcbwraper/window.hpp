@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 #include <xcb/dri3.h>

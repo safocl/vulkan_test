@@ -623,6 +623,7 @@ mDpy( XOpenDisplay( nullptr ) ) {
     //    }
 
     printSurfaceExtents();
+    throw std::runtime_error( "********* TEST ********" );
 
     mQueueConfigs.emplace_back(
     QueueTypeConfig { .queueFamilyIndex = getGraphicsQueueFamilyIndex( mGpu ),
@@ -737,9 +738,9 @@ mDpy( XOpenDisplay( nullptr ) ) {
         };
 
         auto srcImageCI = vk::ImageCreateInfo {
-            .pNext       = &externalMemCI,
-            .flags       = {},
-            .imageType   = vk::ImageType::e2D,
+            .pNext     = &externalMemCI,
+            .flags     = {},
+            .imageType = vk::ImageType::e2D,
             //.format      = mSurfaceFormat.format,
             .format      = vk::Format::eR8G8B8A8Unorm,
             .extent      = vk::Extent3D { .width  = srcWindowGeometry.width,
@@ -758,7 +759,6 @@ mDpy( XOpenDisplay( nullptr ) ) {
         mSrcRamInfo.image = mLogicDev.createImage( srcImageCI );
 
         auto dri3Fd = mSrcRamInfo.window->getImageDataDri3FD();
-            throw std::runtime_error( "********* TEST ********" );
         auto dmaFd  = dri3Fd.getFd();
 
         auto getMemFdProps = PFN_vkGetMemoryFdPropertiesKHR(
@@ -800,7 +800,7 @@ mDpy( XOpenDisplay( nullptr ) ) {
 
         mSrcRamInfo.imageRam = mLogicDev.allocateMemory( memAllocInfo );
 
-        mLogicDev.bindImageMemory(mSrcRamInfo.image, mSrcRamInfo.imageRam, 0);
+        mLogicDev.bindImageMemory( mSrcRamInfo.image, mSrcRamInfo.imageRam, 0 );
 
         const vk::DeviceSize bufferSize =
         srcWindowGeometry.height * srcWindowGeometry.width * bitPerRgb;
@@ -1025,9 +1025,9 @@ void VulkanGraphicRender::update() {
 }
 
 void VulkanGraphicRender::printSurfaceExtents() const {
-    auto surfaceCapabilities = mGpu.getSurfaceCapabilitiesKHR( mSurface );
+    const auto surfaceCapabilities = mGpu.getSurfaceCapabilitiesKHR( mSurface );
 
-    auto surfaceExtents = surfaceCapabilities.currentExtent;
+    const auto surfaceExtents = surfaceCapabilities.currentExtent;
 
     std::cout << std::endl
               << "Surface resolution is " << surfaceExtents.width << "x"
@@ -1123,9 +1123,9 @@ void VulkanRenderInstance::run() const {
     VulkanBase::Extensions extensions {
         .instance = { VK_KHR_SURFACE_EXTENSION_NAME,
                       VK_KHR_XCB_SURFACE_EXTENSION_NAME,
-                      VK_KHR_DISPLAY_EXTENSION_NAME,
-                      VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME,
-                      VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME },
+                      //VK_KHR_DISPLAY_EXTENSION_NAME,
+                      //VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME,
+                      /*VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME */},
         .device   = { VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME }
     };
@@ -1141,12 +1141,12 @@ void VulkanRenderInstance::run() const {
                                           .physDev    = gpu,
                                           .extansions = extensions };
 
-    auto composite = std::make_shared< composite::Composite >( mXcbConnect );
+//    auto composite = std::make_shared< composite::Composite >( mXcbConnect );
+//
+//    auto windowPtr = composite->getCompositeOverleyWindowWithoutInputEvents();
 
-    auto windowPtr = composite->getCompositeOverleyWindowWithoutInputEvents();
-
-    //    auto windowPtr = std::make_shared< xcbwraper::Window >(
-    //    xcbwraper::Window::CreateInfo { mXcbConnect, window } );
+        auto windowPtr = std::make_shared< xcbwraper::Window >(
+        xcbwraper::Window::CreateInfo { mXcbConnect, window } );
 
     VulkanGraphicRender::CreateInfo vulkanRenderCI { .xcbConnect   = mXcbConnect,
                                                      .dstXcbWindow = windowPtr };

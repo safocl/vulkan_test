@@ -1,5 +1,6 @@
 #include "composite.hpp"
 #include "xcbwraper/xcbinternatom.hpp"
+#include "xcbwraper/extension_query_version.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -20,6 +21,10 @@ mXcbConnection( xcbConnection ) {
     if ( !mXcbConnection )
         throw std::runtime_error(
         "In Composite::Composite(XcbConnectionShared xcbConnection) xcbConnection is nullptr" );
+
+    xcbwraper::compositeCheckQueryVersion(*mXcbConnection, 0, 4);    
+    xcbwraper::xfixesCheckQueryVersion(*mXcbConnection, 5, 0);    
+    xcbwraper::shapeCheckQueryVersion(*mXcbConnection);    
 }
 
 Composite::~Composite() {   //= default;
@@ -34,21 +39,6 @@ xcbwraper::WindowShared Composite::getCompositeOverleyWindow() const {
 
     if ( !screen )
         throw std::runtime_error( "Getting the screen is failed." );
-
-    constexpr std::uint32_t XCB_COMPOSITE_MAJOR_VER = 0;
-    constexpr std::uint32_t XCB_COMPOSITE_MINOR_VER = 4;
-
-    auto compositeVersion = xcb_composite_query_version(
-    *mXcbConnection, XCB_COMPOSITE_MAJOR_VER, XCB_COMPOSITE_MINOR_VER );
-
-    std::unique_ptr< xcb_composite_query_version_reply_t > compositeVersionReply(
-    xcb_composite_query_version_reply(
-    *mXcbConnection, compositeVersion, nullptr ) );
-
-    if ( compositeVersionReply->major_version < XCB_COMPOSITE_MAJOR_VER ||
-         compositeVersionReply->minor_version < XCB_COMPOSITE_MINOR_VER )
-        throw std::runtime_error(
-        "In Composite::Composite() : The X server does not implement the required version of the composite extension" );
 
     auto overlayWindowReply = xcb_composite_get_overlay_window_reply(
     *mXcbConnection,
@@ -78,21 +68,6 @@ Composite::getCompositeOverleyWindowWithoutInputEvents() const {
     if ( !screen )
         throw std::runtime_error( "Getting the screen is failed." );
 
-    constexpr std::uint32_t XCB_COMPOSITE_MAJOR_VER = 0;
-    constexpr std::uint32_t XCB_COMPOSITE_MINOR_VER = 4;
-
-    auto compositeVersion = xcb_composite_query_version(
-    *mXcbConnection, XCB_COMPOSITE_MAJOR_VER, XCB_COMPOSITE_MINOR_VER );
-
-    std::unique_ptr< xcb_composite_query_version_reply_t > compositeVersionReply(
-    xcb_composite_query_version_reply(
-    *mXcbConnection, compositeVersion, nullptr ) );
-
-    if ( compositeVersionReply->major_version < XCB_COMPOSITE_MAJOR_VER ||
-         compositeVersionReply->minor_version < XCB_COMPOSITE_MINOR_VER )
-        throw std::runtime_error(
-        "In Composite::getCompositeOverleyWindowWithoutInputEvents : The X server does not implement the required version of the composite extension" );
-
     std::unique_ptr< xcb_composite_get_overlay_window_reply_t > overlayWindowReply {
         xcb_composite_get_overlay_window_reply(
         *mXcbConnection,
@@ -114,17 +89,6 @@ Composite::getCompositeOverleyWindowWithoutInputEvents() const {
     //    std::array< std::uint32_t, 1 > vaList { { XCB_EVENT_MASK_EXPOSURE } };
     //    xcb_change_window_attributes(
     //    *mXcbConnection, *compositeOverlayWindow, XCB_CW_EVENT_MASK, vaList.data() );
-
-    auto xfixesQueryVersionCoockie = xcb_xfixes_query_version(
-    *mXcbConnection, XCB_XFIXES_MAJOR_VERSION, XCB_XFIXES_MINOR_VERSION );
-    std::unique_ptr< xcb_xfixes_query_version_reply_t > xfixesQueryVersionRep {
-        xcb_xfixes_query_version_reply(
-        *mXcbConnection, xfixesQueryVersionCoockie, nullptr )
-    };
-
-    if ( !xfixesQueryVersionRep )
-        throw std::runtime_error(
-        "In Composite::getCompositeOverleyWindowWithoutInputEvents : Xfixes extension version does not compatible." );
 
     xcb_xfixes_region_t region = xcb_generate_id( *mXcbConnection );
 

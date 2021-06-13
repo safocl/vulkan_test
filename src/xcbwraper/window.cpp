@@ -2,6 +2,7 @@
 #include "errno-exception.hpp"
 #include "posix-shm.hpp"
 #include "xcbwindowprop.hpp"
+#include "extension_query_version.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -23,12 +24,7 @@ namespace xcbwraper {
 
 PixmapDri3Fd::PixmapDri3Fd( const CreateInfo & ci ) :
 mConnection( ci.connection ), mReply( ci.reply ) {
-    auto dri3QueryCookie = xcb_dri3_query_version(
-    *mConnection, XCB_DRI3_MAJOR_VERSION, XCB_DRI3_MINOR_VERSION );
-    std::unique_ptr< xcb_dri3_query_version_reply_t > dri3QueryReply {
-        xcb_dri3_query_version_reply( *mConnection, dri3QueryCookie, nullptr )
-    };
-    std::cout << "******** TEST *********" << std::endl;
+    dri3CheckQueryVersion(*mConnection, 1, 2);
 
     mFd = xcb_dri3_buffer_from_pixmap_reply_fds( *mConnection, mReply )[ 0 ];
 
@@ -44,22 +40,12 @@ int PixmapDri3Fd::getFd() const { return mFd; }
 
 namespace {
 void windowXcbExtensionsQueryVersion( xcb_connection_t * connection ) {
-    auto xfixesQueryCookie = xcb_xfixes_query_version(
-    connection, XCB_XFIXES_MAJOR_VERSION, XCB_XFIXES_MINOR_VERSION );
-    std::unique_ptr< xcb_xfixes_query_version_reply_t > xfixesQueryReply {
-        xcb_xfixes_query_version_reply( connection, xfixesQueryCookie, nullptr )
-    };
-
-    auto damageQueryCookie = xcb_damage_query_version(
-    connection, XCB_DAMAGE_MAJOR_VERSION, XCB_DAMAGE_MINOR_VERSION );
-    std::unique_ptr< xcb_damage_query_version_reply_t > damageQueryReply {
-        xcb_damage_query_version_reply( connection, damageQueryCookie, nullptr )
-    };
-
-    auto shmQueryCookie = xcb_shm_query_version( connection );
-    std::unique_ptr< xcb_shm_query_version_reply_t > shmQueryReply {
-        xcb_shm_query_version_reply( connection, shmQueryCookie, nullptr )
-    };
+    compositeCheckQueryVersion( connection, 0, 4 );
+    shmCheckQueryVersion( connection );
+    xfixesCheckQueryVersion( connection, 5, 0 );
+    shapeCheckQueryVersion( connection );
+    dri3CheckQueryVersion( connection, 1, 2 );
+    damageCheckQueryVersion( connection, 1, 1 );
 
     xcb_flush( connection );
 }
@@ -117,18 +103,6 @@ Window::getImageData( posix::SharedMemory::Shared shm ) const {
         throw std::runtime_error(
         "Using Window::getImageData() for not viewvable window" );
 
-    //    constexpr std::uint32_t XCB_COMPOSITE_MAJOR_VER = 0;
-    //    constexpr std::uint32_t XCB_COMPOSITE_MINOR_VER = 4;
-    //
-    //    auto compositeVersion = xcb_composite_query_version(
-    //    *mConnection, XCB_COMPOSITE_MAJOR_VER, XCB_COMPOSITE_MINOR_VER );
-    //    std::unique_ptr< xcb_composite_query_version_reply_t > compositeVersionReply(
-    //    xcb_composite_query_version_reply( *mConnection, compositeVersion, nullptr ) );
-    //    if ( compositeVersionReply->major_version < XCB_COMPOSITE_MAJOR_VER ||
-    //         compositeVersionReply->minor_version < XCB_COMPOSITE_MINOR_VER )
-    //        throw std::runtime_error(
-    //        "In Window::getImageData() : X server is not implement needed version of the composite extension" );
-    //
     //    xcb_composite_redirect_window(
     //    *mConnection, mWindow, XCB_COMPOSITE_REDIRECT_AUTOMATIC );
     //
@@ -205,6 +179,10 @@ PixmapDri3Fd Window::getImageDataDri3FD() const {
 
     auto screen = xcb_setup_roots_iterator( xcb_get_setup( *mConnection ) ).data;
 
+    if ( !screen )
+        throw std::runtime_error(
+        "Using Window::getImageDataDri3FD() : xcb_setup_roots_iterator().data is nullptr" );
+
     xcb_create_pixmap( *mConnection,
                        screen->root_depth,
                        winPixmap,
@@ -212,15 +190,21 @@ PixmapDri3Fd Window::getImageDataDri3FD() const {
                        windowGeometry.width,
                        windowGeometry.height );
     xcb_flush( *mConnection );
+
     auto coockie = xcb_dri3_buffer_from_pixmap( *mConnection, winPixmap );
 
-    auto dri3BufferReply =
-    xcb_dri3_buffer_from_pixmap_reply( *mConnection, coockie, nullptr );
+    xcb_generic_error_t * err {};
+    auto                  dri3BufferReply =
+    xcb_dri3_buffer_from_pixmap_reply( *mConnection, coockie, &err );
+
+    if ( err )
+        throw std::runtime_error(
+        "Using Window::getImageDataDri3FD() : ERROR with code is " +
+        std::to_string( err->error_code ) );
 
     if ( !dri3BufferReply )
         throw std::runtime_error(
         "Using Window::getImageDataDri3FD() : xcb_dri3_buffer_from_pixmap_reply() return is nullptr" );
-
 
     return PixmapDri3Fd( PixmapDri3Fd::CreateInfo { .connection = mConnection,
                                                     .reply = dri3BufferReply } );
@@ -243,8 +227,14 @@ PixmapDri3Fd Window::getOffscreenImageDataDri3FD() {
 
     auto coockie = xcb_dri3_buffer_from_pixmap( *mConnection, pixmap );
 
-    auto dri3BufferReply =
-    xcb_dri3_buffer_from_pixmap_reply( *mConnection, coockie, nullptr );
+    xcb_generic_error_t * err {};
+    auto                  dri3BufferReply =
+    xcb_dri3_buffer_from_pixmap_reply( *mConnection, coockie, &err );
+
+    if ( err )
+        throw std::runtime_error(
+        "Using Window::getImageDataDri3FD() : ERROR with code is " +
+        std::to_string( err->error_code ) );
 
     if ( !dri3BufferReply )
         throw std::runtime_error(
