@@ -46,7 +46,7 @@ public:
     };
 
     Window();
-    explicit Window( CreateInfo );
+    explicit Window( const CreateInfo & );
     Window( const Window & ) = default;
     Window( Window && )      = default;
     virtual ~Window();

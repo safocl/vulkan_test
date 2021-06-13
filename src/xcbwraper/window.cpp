@@ -24,7 +24,7 @@ namespace xcbwraper {
 
 PixmapDri3Fd::PixmapDri3Fd( const CreateInfo & ci ) :
 mConnection( ci.connection ), mReply( ci.reply ) {
-    dri3CheckQueryVersion(*mConnection, 1, 2);
+    dri3CheckQueryVersion( *mConnection, 1, 2 );
 
     mFd = xcb_dri3_buffer_from_pixmap_reply_fds( *mConnection, mReply )[ 0 ];
 
@@ -53,8 +53,12 @@ void windowXcbExtensionsQueryVersion( xcb_connection_t * connection ) {
 
 Window::Window() { windowXcbExtensionsQueryVersion( *mConnection ); }
 
-Window::Window( Window::CreateInfo ci ) :
+Window::Window( const Window::CreateInfo & ci ) :
 mConnection( ci.connection ), mWindow( ci.window ) {
+    if ( mWindow == XCB_NONE )
+        throw std::runtime_error(
+        "Window is null window id" );
+
     windowXcbExtensionsQueryVersion( *mConnection );
 }
 

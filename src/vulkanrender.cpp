@@ -622,12 +622,16 @@ mDpy( XOpenDisplay( nullptr ) ) {
     //        mSurface = mInstance.createDisplayPlaneSurfaceKHR( displaySurfaceCI );
     //    }
 
-    printSurfaceExtents();
-    throw std::runtime_error( "********* TEST ********" );
-
     mQueueConfigs.emplace_back(
     QueueTypeConfig { .queueFamilyIndex = getGraphicsQueueFamilyIndex( mGpu ),
                       .priorities       = QueuesPrioritiesVec { 1.0f } } );
+
+    if ( !mGpu.getSurfaceSupportKHR( mQueueConfigs.at( 0 ).queueFamilyIndex,
+                                     mSurface ) )
+        throw std::runtime_error( "ERROR: Surface cann't support queueFamilyIndex!!!" );
+
+    printSurfaceExtents();
+    throw std::runtime_error( "********* TEST ********" );
 
     {
         std::vector< vk::DeviceQueueCreateInfo > deviceQueueCreateInfos;
@@ -1125,7 +1129,7 @@ void VulkanRenderInstance::run() const {
                       VK_KHR_XCB_SURFACE_EXTENSION_NAME,
                       //VK_KHR_DISPLAY_EXTENSION_NAME,
                       //VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME,
-                      /*VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME */},
+                      /*VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME */ },
         .device   = { VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME }
     };
@@ -1141,12 +1145,12 @@ void VulkanRenderInstance::run() const {
                                           .physDev    = gpu,
                                           .extansions = extensions };
 
-//    auto composite = std::make_shared< composite::Composite >( mXcbConnect );
-//
-//    auto windowPtr = composite->getCompositeOverleyWindowWithoutInputEvents();
+    //    auto composite = std::make_shared< composite::Composite >( mXcbConnect );
+    //
+    //    auto windowPtr = composite->getCompositeOverleyWindowWithoutInputEvents();
 
-        auto windowPtr = std::make_shared< xcbwraper::Window >(
-        xcbwraper::Window::CreateInfo { mXcbConnect, window } );
+    auto windowPtr = std::make_shared< xcbwraper::Window >(
+    xcbwraper::Window::CreateInfo { mXcbConnect, window } );
 
     VulkanGraphicRender::CreateInfo vulkanRenderCI { .xcbConnect   = mXcbConnect,
                                                      .dstXcbWindow = windowPtr };
