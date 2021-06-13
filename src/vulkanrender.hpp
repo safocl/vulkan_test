@@ -5,15 +5,15 @@
 #include <thread>
 #include <mutex>
 
+//#define VULKAN_HPP_NO_EXCEPTIONS
+#define VK_USE_PLATFORM_XCB_KHR
+//#define VK_USE_PLATFORM_XLIB_XRANDR_EXT
+#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
+
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
-
-//#define VULKAN_HPP_NO_EXCEPTIONS
-#define VK_USE_PLATFORM_XCB_KHR
-#define VK_USE_PLATFORM_XLIB_XRANDR_EXT
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_core.h>
@@ -89,7 +89,7 @@ class VulkanGraphicRender : public Renderer, public VulkanBase {
 public:
     struct CreateInfo final {
         xcbwraper::XcbConnectionShared xcbConnect;
-        xcbwraper::WindowShared        xcbWindow;
+        xcbwraper::WindowShared        dstXcbWindow;
     };
 
     struct RamImageMapInfo final {
@@ -103,9 +103,7 @@ public:
     };
 
     struct CmdBufferInitConfig final {
-        vk::CommandBufferBeginInfo cmdBufferBI {
-            .flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse
-        };
+        vk::CommandBufferBeginInfo cmdBufferBI { .flags = {} };
 
         std::array< vk::ImageSubresourceRange, 1 > ranges {
             vk::ImageSubresourceRange { .aspectMask =
@@ -124,18 +122,19 @@ public:
         };
 
         vk::ImageMemoryBarrier bufferImageCopyMemoryBarier {
-            .srcAccessMask = vk::AccessFlagBits::eTransferRead,
-            .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
+            .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+            .dstAccessMask = vk::AccessFlagBits::eTransferRead,
             .oldLayout     = vk::ImageLayout::eTransferDstOptimal,
             .newLayout     = vk::ImageLayout::eTransferSrcOptimal,
         };
 
         vk::ImageMemoryBarrier imageMemoryBarierPresentToClear {
-            .srcAccessMask = vk::AccessFlagBits::eTransferRead,
+            .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
             .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
             .oldLayout     = vk::ImageLayout::eUndefined,
             .newLayout     = vk::ImageLayout::eTransferDstOptimal,
         };
+
         vk::ImageMemoryBarrier imageMemoryBarierClearToPresent {
             .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
             .dstAccessMask = vk::AccessFlagBits::eMemoryWrite,
@@ -194,8 +193,8 @@ protected:
     vk::Device           mLogicDev;
     CommandBuffersVec    mSwapchainCmdBuffers;
 
-    //    xcbwraper::XCBConnection mXcbConnect;
-    xcbwraper::WindowShared mDstWindow;
+    xcbwraper::XcbConnectionShared mXcbConnect;
+    xcbwraper::WindowShared        mDstWindow;
 
     ImageVec                           mSwapchainImages;
     SemaphoresVec                      mSemaphores;
