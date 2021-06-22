@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <xcb/dri3.h>
 #include <xcb/damage.h>
 #include <xcb/composite.h>
@@ -15,19 +16,21 @@ namespace xcbwraper {
 #define CHECK_QUERY_VERSION( EXTENSION )                                          \
     inline void EXTENSION##CheckQueryVersion(                                     \
     xcb_connection_t * connection, int needMajorVersion, int needMinorVersion ) { \
-        auto EXTENSION##QueryCookie = xcb_##EXTENSION##_query_version(            \
+        auto queryCoockie = xcb_##EXTENSION##_query_version(            \
         connection, needMajorVersion, needMinorVersion );                         \
                                                                                   \
-        xcb_generic_error_t * err {};                                             \
         std::unique_ptr< xcb_##EXTENSION##_query_version_reply_t >                \
-        EXTENSION##QueryReply { xcb_##EXTENSION##_query_version_reply(            \
-        connection, EXTENSION##QueryCookie, &err ) };                             \
+        queryReply { xcb_##EXTENSION##_query_version_reply(            \
+        connection, queryCoockie, nullptr ) };                          \
                                                                                   \
-        if ( err ) {                                                              \
+        if ( !queryReply ) {                                                      \
             throw std::runtime_error(                                             \
-            "##EXTENSION query version request failed with code error : " +       \
-            std::to_string( static_cast< std::uint32_t >( err->error_code ) ) );  \
+            #EXTENSION " query version request failed " );         \
         }                                                                         \
+                                                                                  \
+        std::cout << #EXTENSION " version is "                                    \
+                  << queryReply->major_version << "."                  \
+                  << queryReply->minor_version << std::endl;           \
     }
 
 CHECK_QUERY_VERSION( composite )
@@ -36,34 +39,55 @@ CHECK_QUERY_VERSION( dri3 )
 CHECK_QUERY_VERSION( present )
 CHECK_QUERY_VERSION( xfixes )
 
-inline void shapeCheckQueryVersion( xcb_connection_t * connection ) {
-    auto shapeQueryCookie = xcb_shape_query_version( connection );
+//inline void dri3CheckQueryVersion( xcb_connection_t * connection,
+//                                   int                needMajorVersion,
+//                                   int                needMinorVersion ) {
+//    auto queryCookie =
+//    xcb_dri3_query_version( connection, needMajorVersion, needMinorVersion );
+//
+//    std::unique_ptr< xcb_dri3_query_version_reply_t > queryReply {
+//        xcb_dri3_query_version_reply( connection, queryCookie, nullptr )
+//    };
+//
+//    if ( !queryReply ) {
+//        throw std::runtime_error(
+//        "dri3 query version request failed " );
+//    }
+//
+//    std::cout << "dri3 version is " << queryReply->major_version << "."
+//              << queryReply->minor_version << std::endl;
+//}
 
-    xcb_generic_error_t *                              err {};
-    std::unique_ptr< xcb_shape_query_version_reply_t > shapeQueryReply {
-        xcb_shape_query_version_reply( connection, shapeQueryCookie, &err )
+inline void shapeCheckQueryVersion( xcb_connection_t * connection ) {
+    auto queryCookie = xcb_shape_query_version( connection );
+
+    std::unique_ptr< xcb_shape_query_version_reply_t > queryReply {
+        xcb_shape_query_version_reply( connection, queryCookie, nullptr )
     };
 
-    if ( err ) {
+    if ( !queryReply ) {
         throw std::runtime_error(
-        "shape query version request failed with code error : " +
-        std::to_string( static_cast< std::uint32_t >( err->error_code ) ) );
+        "shape query version request failed" );
     }
+
+    std::cout << "shape version is " << queryReply->major_version << "."
+              << queryReply->minor_version << std::endl;
 }
 
 inline void shmCheckQueryVersion( xcb_connection_t * connection ) {
-    auto shmQueryCookie = xcb_shm_query_version( connection );
+    auto queryCookie = xcb_shm_query_version( connection );
 
-    xcb_generic_error_t *                            err {};
-    std::unique_ptr< xcb_shm_query_version_reply_t > shmQueryReply {
-        xcb_shm_query_version_reply( connection, shmQueryCookie, &err )
+    std::unique_ptr< xcb_shm_query_version_reply_t > queryReply {
+        xcb_shm_query_version_reply( connection, queryCookie, nullptr )
     };
 
-    if ( err ) {
+    if ( !queryReply ) {
         throw std::runtime_error(
-        "shm query version request failed with code error : " +
-        std::to_string( static_cast< std::uint32_t >( err->error_code ) ) );
+        "shm query version request failed" );
     }
+
+    std::cout << "shm version is " << queryReply->major_version << "."
+              << queryReply->minor_version << std::endl;
 }
 
 #undef CHECK_QUERY_VERSION

@@ -2,6 +2,7 @@
 
 #include "xcbwraper/xcbconnection.hpp"
 #include "xcbwraper/window.hpp"
+#include "defines.hpp"
 
 #include <xcb/composite.h>
 #include <xcb/xcb.h>

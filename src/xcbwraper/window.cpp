@@ -1,12 +1,14 @@
 #include "window.hpp"
 #include "errno-exception.hpp"
 #include "posix-shm.hpp"
+#include "xcbconnection.hpp"
 #include "xcbwindowprop.hpp"
 #include "extension_query_version.hpp"
 
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <exception>
@@ -38,16 +40,38 @@ PixmapDri3Fd::~PixmapDri3Fd() {
 
 int PixmapDri3Fd::getFd() const { return mFd; }
 
+PixmapData::PixmapData( XcbConnectionShared     connection,
+                        xcb_get_image_reply_t * reply ) :
+mConnection( connection ),
+mReply( reply ) {
+    if ( !mReply )
+        throw std::runtime_error(
+        "In PixmapData::PixmapData( xcb_get_image_reply_t * reply) mReply is nullptr" );
+
+    auto dataPtr = xcb_get_image_data( mReply );
+    auto size    = xcb_get_image_data_length( mReply );
+
+    if ( !dataPtr || size <= 0 )
+        throw std::runtime_error(
+        "In PixmapData::PixmapData( xcb_get_image_reply_t * reply) mReply is nullptr" );
+
+    mDataArr = DataArr { dataPtr, static_cast< DataArr::size_type >( size ) };
+}
+
+PixmapData::~PixmapData() { delete mReply; }
+
+PixmapData::DataArr PixmapData::getData() const { return mDataArr; }
+
+//PixmapData::DataArr::size_type PixmapData::size() const { return mDataArr.size(); }
+
 namespace {
 void windowXcbExtensionsQueryVersion( xcb_connection_t * connection ) {
     compositeCheckQueryVersion( connection, 0, 4 );
     shmCheckQueryVersion( connection );
     xfixesCheckQueryVersion( connection, 5, 0 );
     shapeCheckQueryVersion( connection );
-    dri3CheckQueryVersion( connection, 1, 2 );
+    //dri3CheckQueryVersion( connection, 1, 2 );
     damageCheckQueryVersion( connection, 1, 1 );
-
-    xcb_flush( connection );
 }
 }   // namespace
 
@@ -56,8 +80,7 @@ Window::Window() { windowXcbExtensionsQueryVersion( *mConnection ); }
 Window::Window( const Window::CreateInfo & ci ) :
 mConnection( ci.connection ), mWindow( ci.window ) {
     if ( mWindow == XCB_NONE )
-        throw std::runtime_error(
-        "Window is null window id" );
+        throw std::runtime_error( "Window is null window id" );
 
     windowXcbExtensionsQueryVersion( *mConnection );
 }
@@ -107,38 +130,17 @@ Window::getImageData( posix::SharedMemory::Shared shm ) const {
         throw std::runtime_error(
         "Using Window::getImageData() for not viewvable window" );
 
-    //    xcb_composite_redirect_window(
-    //    *mConnection, mWindow, XCB_COMPOSITE_REDIRECT_AUTOMATIC );
-    //
-    //    xcb_pixmap_t winPixmap = xcb_generate_id( *mConnection );
-    //    xcb_composite_name_window_pixmap( *mConnection, mWindow, winPixmap );
-
     auto                    windowGeometry = getProperties().getGeometry();
     constexpr std::uint32_t plane          = ~0;
     const std::uint32_t imageSize = windowGeometry.height * windowGeometry.width * 4;
 
-    //    shm->release();
     shm->reinit( imageSize );
-
-    //shm->init(imageSize);
 
     const xcb_shm_seg_t shmSeg = xcb_generate_id( *mConnection );
 
     xcb_shm_attach( *mConnection, shmSeg, shm->getId(), false );
 
     xcb_generic_error_t * error = nullptr;
-
-    //auto shmSegCreateCoockie =
-    //xcb_shm_create_segment( *mConnection, shmSeg, imageSize, false);
-
-    //std::unique_ptr< xcb_shm_create_segment_reply_t > shmSegReply {
-    //    xcb_shm_create_segment_reply( *mConnection, shmSegCreateCoockie, &error )
-    //};
-
-    //if ( error )
-    //    throw std::runtime_error(
-    //    "In Window::getImageData(): xcb_shm_create_segment_reply() return error code " +
-    //    std::to_string( static_cast< std::uint32_t >( error->error_code ) ) );
 
     const auto shmGetImgCoockie = xcb_shm_get_image( *mConnection,
                                                      mWindow,
@@ -150,6 +152,74 @@ Window::getImageData( posix::SharedMemory::Shared shm ) const {
                                                      XCB_IMAGE_FORMAT_Z_PIXMAP,
                                                      shmSeg,
                                                      0 );
+
+    std::unique_ptr< xcb_shm_get_image_reply_t > shmGetImgReply {
+        xcb_shm_get_image_reply( *mConnection, shmGetImgCoockie, &error )
+    };
+
+    if ( error ) {
+        throw std::runtime_error(
+        "In Window::getImageData(): xcb_shm_get_image_reply() return error code " +
+        std::to_string( static_cast< std::uint32_t >( error->error_code ) ) );
+    }
+
+    xcb_shm_detach( *mConnection, shmSeg );
+
+    xcb_flush( *mConnection );
+
+    return shm;
+}
+
+posix::SharedMemory::Shared Window::getOffscreenShmImageData() {
+    if ( mWindow == XCB_NONE )
+        throw std::runtime_error(
+        "Using Window::getImageData() for null window id" );
+
+    posix::SharedMemory::Shared shm = std::make_shared< posix::SharedMemory >();
+    //shm                             = getImageData( shm );
+
+    return getOffscreenShmImageData( shm );
+}
+
+posix::SharedMemory::Shared
+Window::getOffscreenShmImageData( posix::SharedMemory::Shared shm ) {
+    if ( mWindow == XCB_NONE )
+        throw std::runtime_error(
+        "Using Window::getImageData() for null window id" );
+
+    if ( !getProperties().isViewable() )
+        throw std::runtime_error(
+        "Using Window::getImageData() for not viewvable window" );
+
+    auto windowGeometry = getProperties().getGeometry();
+
+    const std::uint32_t imageSize = windowGeometry.height * windowGeometry.width * 4;
+
+    shm->reinit( imageSize );
+
+    const xcb_shm_seg_t shmSeg = xcb_generate_id( *mConnection );
+
+    xcb_shm_attach( *mConnection, shmSeg, shm->getId(), false );
+
+    redirect();
+
+    xcb_pixmap_t pixmap = xcb_generate_id( *mConnection );
+
+    xcb_composite_name_window_pixmap( *mConnection, *this, pixmap );
+
+    constexpr std::uint32_t plane            = ~0;
+    const auto              shmGetImgCoockie = xcb_shm_get_image( *mConnection,
+                                                     mWindow,
+                                                     0,
+                                                     0,
+                                                     windowGeometry.width,
+                                                     windowGeometry.height,
+                                                     plane,
+                                                     XCB_IMAGE_FORMAT_Z_PIXMAP,
+                                                     shmSeg,
+                                                     0 );
+
+    xcb_generic_error_t * error = nullptr;
 
     std::unique_ptr< xcb_shm_get_image_reply_t > shmGetImgReply {
         xcb_shm_get_image_reply( *mConnection, shmGetImgCoockie, &error )
@@ -319,6 +389,56 @@ void Window::fullDamaged() {
 
     xcb_flush( *mConnection );
 }
+
+PixmapData Window::getOffscreenImageData() {
+    if ( mWindow == XCB_NONE )
+        throw std::runtime_error(
+        "Using Window::getOffscreenImageData() for null window id" );
+
+    if ( !getProperties().isViewable() )
+        throw std::runtime_error(
+        "Using Window::getOffscreenImageData() for not viewvable window" );
+
+    xcb_pixmap_t pixmap = xcb_generate_id( *mConnection );
+
+    redirect();
+
+    xcb_composite_name_window_pixmap( *mConnection, *this, pixmap );
+
+    auto windowGeometry = getProperties().getGeometry();
+
+    std::uint32_t planeMask = ~0;
+    auto          cookie    = xcb_get_image( *mConnection,
+                                 XCB_IMAGE_FORMAT_Z_PIXMAP,
+                                 pixmap,
+                                 //mWindow,
+                                 0,
+                                 0,
+                                 windowGeometry.width,
+                                 windowGeometry.height,
+                                 planeMask );
+
+    xcb_generic_error_t * err {};
+    auto                  reply = xcb_get_image_reply( *mConnection, cookie, &err );
+
+    if ( err || !reply ) {
+        std::string errStr;
+
+        switch ( err->error_code ) {
+        case XCB_DRAWABLE: errStr = "Drawable"; break;
+        case XCB_MATCH: errStr = "Match"; break;
+        case XCB_VALUE: errStr = "Value"; break;
+        }
+
+        throw std::runtime_error(
+        "In Window::getOffscreenImageData() : xcb_get_image_reply returned nullptr. Error code " +
+        errStr );
+    }
+
+    return PixmapData( mConnection, reply );
+}
+
+void Window::detach() { mWindow = XCB_NONE; }
 
 CompositeWindow::CompositeWindow() : CompositeWindow::Window() {}
 CompositeWindow::CompositeWindow( CompositeWindow::CreateInfo ci ) :

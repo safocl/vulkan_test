@@ -1,14 +1,16 @@
 #pragma once
 
-#include <cstdint>
-#include <vector>
-#include <thread>
-#include <mutex>
-
 //#define VULKAN_HPP_NO_EXCEPTIONS
 #define VK_USE_PLATFORM_XCB_KHR
 #define VK_USE_PLATFORM_XLIB_XRANDR_EXT
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
+#define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
+
+#include <cstdint>
+#include <list>
+#include <vector>
+#include <thread>
+#include <mutex>
 
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
@@ -23,18 +25,24 @@
 #include "composite.hpp"
 #include "xcbwraper/xcbconnection.hpp"
 #include "render.hpp"
+#include "defines.hpp"
+
 
 namespace core::renderer {
 
 using ExtensionsVec          = std::vector< const char * >;
 using DeviceQueueCreateInfos = std::vector< vk::DeviceQueueCreateInfo >;
-using QueueFamilyIndex       = std::uint32_t;
+using QueueFamilyIndex       = u32;
 using SemaphoresVec          = std::vector< vk::Semaphore >;
 using ImageVec               = std::vector< vk::Image >;
+using BufferVec              = std::vector< vk::Buffer >;
 using QueuesVec              = std::vector< vk::Queue >;
 using QueuesPriority         = float;
 using QueuesPrioritiesVec    = std::vector< QueuesPriority >;
 using CommandBuffersVec      = std::vector< vk::CommandBuffer >;
+using WindowsList            = std::list< xcbwraper::WindowShared >;
+using ImageBlitVec           = std::vector< vk::ImageBlit >;
+using BufferImageCopyVec     = std::vector< vk::BufferImageCopy >;
 
 class VulkanBase {
 public:
@@ -93,13 +101,22 @@ public:
     };
 
     struct RamImageMapInfo final {
-        vk::Buffer                  imageBuffer;
-        vk::Image                   image;
-        vk::DeviceMemory            imageRam;
-        vk::DeviceMemory            imageBufferRam;
-        void *                      imageDataBridge;
-        posix::SharedMemory::Shared imageShm;
-        xcbwraper::WindowShared     window;
+        struct ImageInfoNode final {
+            vk::Image             image;
+            vk::DeviceMemory      imageRam;
+            xcbwraper::PixmapData pixmapData;
+            ImageBlitVec          blitRegions;
+        };
+
+        std::vector< ImageInfoNode > imageInfoNodes;
+
+        //        BufferVec                   imageBuffers;
+        //        ImageVec                    images;
+        //        vk::DeviceMemory            imageRam;
+        //        vk::DeviceMemory            imageBufferRam;
+        //        void *                      imageDataBridge;
+        //        posix::SharedMemory::Shared imageShm;
+        WindowsList windows;
     };
 
     struct CmdBufferInitConfig final {
@@ -112,6 +129,12 @@ public:
                                         .levelCount     = 1,
                                         .baseArrayLayer = 0,
                                         .layerCount     = 1 }
+        };
+
+        vk::ImageMemoryBarrier srcImageUndefToTransferSrcOptimalBarier {
+            .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+            .oldLayout     = vk::ImageLayout::eUndefined,
+            .newLayout     = vk::ImageLayout::eTransferSrcOptimal,
         };
 
         vk::ImageMemoryBarrier srcImageInitMemoryBarier {
@@ -185,7 +208,7 @@ public:
     void printSurfaceExtents() const;
 
 protected:
-    static constexpr std::uint8_t countSwapChainBuffers = 3;
+    static constexpr u8 countSwapChainBuffers = 3;
 
     vk::SurfaceKHR       mSurface;
     vk::SurfaceFormatKHR mSurfaceFormat;
@@ -196,11 +219,11 @@ protected:
     xcbwraper::XcbConnectionShared mXcbConnect;
     xcbwraper::WindowShared        mDstWindow;
 
-    ImageVec                           mSwapchainImages;
-    SemaphoresVec                      mSemaphores;
-    RamImageMapInfo                    mSrcRamInfo;
-    std::vector< vk::ImageBlit >       mSrcToDstBlitRegions;
-    std::vector< vk::BufferImageCopy > mSrcBufferImgCopyRegions;
+    ImageVec        mSwapchainImages;
+    SemaphoresVec   mSemaphores;
+    RamImageMapInfo mSrcRamInfo;
+    //    ImageBlitVec       mSrcToDstBlitRegions;
+    BufferImageCopyVec mSrcBufferImgCopyRegions;
 
     DrawConfig          mDrawConf {};
     CmdBufferInitConfig mCmdConfig {};
@@ -209,8 +232,6 @@ protected:
     ThreadPool          mThreadPool;
 
     std::unique_ptr< std::mutex > mCurrentSwapchainExtentMutex;
-
-    Display * mDpy;
 
     //    composite::Composite mComposite;
 };

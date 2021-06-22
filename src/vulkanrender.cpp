@@ -5,16 +5,12 @@
 #include "xcbwraper/xcbconnection.hpp"
 #include "xcbwraper/xcbinternatom.hpp"
 
-#include <X11/Xlib.h>
-#include <X11/extensions/Xrandr.h>
-#include <bits/c++config.h>
 #include <chrono>
 #include <mutex>
 #include <thread>
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -26,22 +22,20 @@
 #include <vector>
 #include <vulkan/vulkan.hpp>
 
+VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
+
 namespace core::renderer {
 
 namespace {
 
-[[nodiscard]] vk::DeviceMemory createMemAndBind
-[[maybe_unused]] ( const vk::PhysicalDevice &    gpu,
-                   const vk::Device &            logicDev,
-                   const vk::Image &             image,
-                   const vk::MemoryPropertyFlags memReqFlags ) {
-    const auto memRequarements = logicDev.getImageMemoryRequirements( image );
-    const auto memTypeBitsRequarements = memRequarements.memoryTypeBits;
-
+[[nodiscard]] u32 getMemTypeIndex( vk::PhysicalDevice gpu,
+                                   const u32          memTypeBitsRequarements,
+                                   const vk::MemoryPropertyFlags memReqFlags ) {
     const auto gpuMemPropArr = gpu.getMemoryProperties().memoryTypes;
     const auto countMemProps = gpu.getMemoryProperties().memoryTypeCount;
 
-    std::cout << "Image Mem types arr size is : " << gpuMemPropArr.size()
+    std::cout << std::endl
+              << "Image Mem types arr size is : " << gpuMemPropArr.size()
               << std::endl
               << "Image Mem types count is : "
               << gpu.getMemoryProperties().memoryTypeCount << std::endl;
@@ -52,7 +46,7 @@ namespace {
               << std::endl
               << std::endl;
 
-    std::uint32_t                                 memTypeIndex = 0;
+    u32                                           memTypeIndex = 0;
     constexpr decltype( memTypeBitsRequarements ) memTypeBit   = 1;
     for ( ; memTypeIndex < countMemProps &&
             !( static_cast< bool >(
@@ -63,55 +57,8 @@ namespace {
           ++memTypeIndex )
         ;
 
-    std::cout << "Property flags is : "
-              << vk::to_string( gpuMemPropArr.at( memTypeIndex ).propertyFlags )
-              << std::endl
-              << "Type bit is : " << ( memTypeBit << memTypeIndex ) << std::endl
-              << std::endl;
-
     if ( memTypeIndex == countMemProps )
-        throw std::runtime_error(
-        "In Render constructor Requared memory index not found!" );
-
-    vk::MemoryAllocateInfo memAllocInfo { .allocationSize  = memRequarements.size,
-                                          .memoryTypeIndex = memTypeIndex };
-    vk::DeviceMemory       imageRam = logicDev.allocateMemory( memAllocInfo );
-
-    logicDev.bindImageMemory( image, imageRam, 0 );
-
-    return imageRam;
-}
-
-[[nodiscard]] vk::DeviceMemory createMemAndBind
-[[maybe_unused]] ( const vk::PhysicalDevice &    gpu,
-                   const vk::Device &            logicDev,
-                   const vk::Buffer &            buffer,
-                   const vk::MemoryPropertyFlags memReqFlags ) {
-    const auto memRequarements = logicDev.getBufferMemoryRequirements( buffer );
-    const auto memTypeBitsRequarements = memRequarements.memoryTypeBits;
-
-    const auto gpuMemPropArr = gpu.getMemoryProperties().memoryTypes;
-    const auto countMemProps = gpu.getMemoryProperties().memoryTypeCount;
-
-    std::cout << "Mem types arr size is : " << gpuMemPropArr.size() << std::endl
-              << "Mem types count is : " << gpu.getMemoryProperties().memoryTypeCount
-              << std::endl;
-
-    std::cout << "Mem requarements flags is : " << vk::to_string( memReqFlags )
-              << std::endl
-              << "Mem type bits req is : " << memTypeBitsRequarements << std::endl
-              << std::endl;
-
-    std::uint32_t                                 memTypeIndex = 0;
-    constexpr decltype( memTypeBitsRequarements ) memTypeBit   = 1;
-    for ( ; memTypeIndex < countMemProps &&
-            !( static_cast< bool >(
-               memReqFlags ==
-               ( memReqFlags & gpuMemPropArr.at( memTypeIndex ).propertyFlags ) ) &&
-               static_cast< bool >( memTypeBitsRequarements &
-                                    ( memTypeBit << memTypeIndex ) ) );
-          ++memTypeIndex )
-        ;
+        throw std::runtime_error( "Requared memory index not found!" );
 
     std::cout << "Property flags is : "
               << vk::to_string( gpuMemPropArr.at( memTypeIndex ).propertyFlags )
@@ -119,23 +66,13 @@ namespace {
               << "Type bit is : " << ( memTypeBit << memTypeIndex ) << std::endl
               << std::endl;
 
-    if ( memTypeIndex == countMemProps )
-        throw std::runtime_error(
-        "In Render constructor Requared memory index not found!" );
-
-    vk::MemoryAllocateInfo memAllocInfo { .allocationSize  = memRequarements.size,
-                                          .memoryTypeIndex = memTypeIndex };
-    vk::DeviceMemory       bufferRam = logicDev.allocateMemory( memAllocInfo );
-
-    logicDev.bindBufferMemory( buffer, bufferRam, 0 );
-
-    return bufferRam;
+    return memTypeIndex;
 }
 
 [[nodiscard]] std::vector< vk::CommandBuffer >
 commandBuffersInit( const vk::Device &      logicDev,
                     const vk::CommandPool & commandPool,
-                    std::uint32_t           swapchainImagesCount ) {
+                    u32                     swapchainImagesCount ) {
     vk::CommandBufferAllocateInfo commandBufferAI { .commandPool = commandPool,
                                                     .level =
                                                     vk::CommandBufferLevel::ePrimary,
@@ -205,10 +142,9 @@ swapchainInit( const vk::PhysicalDevice &          gpu,
         //        .flags =
         //        vk::SwapchainCreateFlagBitsKHR::eMutableFormat,
         .surface       = surface,
-        .minImageCount = std::max< std::uint32_t >(
-        std::min< std::uint32_t >(
-        gpu.getSurfaceCapabilitiesKHR( surface ).maxImageCount,
-        countSwapchainsOptimal ),
+        .minImageCount = std::max< u32 >(
+        std::min< u32 >( gpu.getSurfaceCapabilitiesKHR( surface ).maxImageCount,
+                         countSwapchainsOptimal ),
         gpu.getSurfaceCapabilitiesKHR( surface ).minImageCount ),
         .imageFormat      = needFormat.format,
         .imageColorSpace  = needFormat.colorSpace,
@@ -301,7 +237,7 @@ void fillCmdBuffers [[maybe_unused]] ( QueueFamilyIndex    queueFamilyIndex,
                              .dstQueueFamilyIndex = queueFamilyIndex,
                              .subresourceRange    = ranges.at( 0 ) } );
 
-    for ( std::uint32_t i = 0; i < swapchainImages.size(); ++i ) {
+    for ( u32 i = 0; i < swapchainImages.size(); ++i ) {
         imageMemoryBarierClearToPresent->image = swapchainImages.at( i );
         imageMemoryBarierPresentToClear->image = swapchainImages.at( i );
 
@@ -333,8 +269,9 @@ void fillCmdBuffers [[maybe_unused]] ( QueueFamilyIndex    queueFamilyIndex,
 }
 
 std::vector< vk::ImageBlit >
-initImageBlitRegions( xcbwraper::WindowShared srcWindow,
-                      xcbwraper::WindowShared dstWindow ) {
+initImageBlitRegion( xcbwraper::WindowShared srcWindow ) {
+    std::vector< vk::ImageBlit > res;
+
     vk::ArrayWrapper1D< vk::Offset3D, 2 > srcBound {
         { vk::Offset3D { .x = 0, .y = 0, .z = 0 },
           vk::Offset3D { .x = srcWindow->getProperties().getGeometry().width,
@@ -342,10 +279,13 @@ initImageBlitRegions( xcbwraper::WindowShared srcWindow,
                          .z = 1 } }
     };
 
+    auto srcGeometry = srcWindow->getProperties().getGeometry();
+
     vk::ArrayWrapper1D< vk::Offset3D, 2 > dstBound {
-        { vk::Offset3D { .x = 0, .y = 0, .z = 0 },
-          vk::Offset3D { .x = dstWindow->getProperties().getGeometry().width,
-                         .y = dstWindow->getProperties().getGeometry().height,
+        { vk::Offset3D {
+          .x = srcGeometry.leftTopPoint.x, .y = srcGeometry.leftTopPoint.y, .z = 0 },
+          vk::Offset3D { .x = srcGeometry.rightBotPoint.x,
+                         .y = srcGeometry.rightBotPoint.y,
                          .z = 1 } }
     };
 
@@ -361,11 +301,11 @@ initImageBlitRegions( xcbwraper::WindowShared srcWindow,
                                                 .baseArrayLayer = 0,
                                                 .layerCount     = 1 };
 
-    return std::vector< vk::ImageBlit > { { vk::ImageBlit {
+    return std::vector< vk::ImageBlit > { vk::ImageBlit {
     .srcSubresource = srcSubresource,
     .srcOffsets     = srcBound,
     .dstSubresource = dstSubresource,
-    .dstOffsets     = dstBound } } };
+    .dstOffsets     = dstBound } };
 }
 
 [[nodiscard]] std::vector< vk::BufferImageCopy > initBufferImageCopyRegions
@@ -433,7 +373,7 @@ void fillCmdBuffersForPresentComposite
                                     .layerCount     = 1 }
     };
 
-    for ( std::uint32_t i = 0; i < swapchainImages.size(); ++i ) {
+    for ( u32 i = 0; i < swapchainImages.size(); ++i ) {
         cmdBufferConf.imageMemoryBarierClearToPresent.image =
         swapchainImages.at( i );
         cmdBufferConf.imageMemoryBarierPresentToClear.image =
@@ -450,21 +390,21 @@ void fillCmdBuffersForPresentComposite
         { cmdBufferConf.srcImageInitMemoryBarier,
           cmdBufferConf.imageMemoryBarierPresentToClear } );
 
-        //        commandBuffers.at( i ).waitEvents( { cmdBufferConf.bufferImageCopied },
-        //                                           vk::PipelineStageFlagBits::eHost,
-        //                                           vk::PipelineStageFlagBits::eTransfer,
-        //                                           {},
-        //                                           {},
-        //                                           {} );
-        //
-        //        commandBuffers.at( i ).copyBufferToImage(
-        //        srcBuffer,
-        //        srcImage,
-        //        vk::ImageLayout::eTransferDstOptimal,
-        //        srcBufferImgCopyRegions );
-        //
-        //        commandBuffers.at( i ).resetEvent( cmdBufferConf.bufferImageCopied,
-        //                                           vk::PipelineStageFlagBits::eTransfer );
+        commandBuffers.at( i ).waitEvents( { cmdBufferConf.bufferImageCopied },
+                                           vk::PipelineStageFlagBits::eHost,
+                                           vk::PipelineStageFlagBits::eTransfer,
+                                           {},
+                                           {},
+                                           {} );
+
+        commandBuffers.at( i ).copyBufferToImage(
+        srcBuffer,
+        srcImage,
+        vk::ImageLayout::eTransferDstOptimal,
+        srcBufferImgCopyRegions );
+
+        commandBuffers.at( i ).resetEvent( cmdBufferConf.bufferImageCopied,
+                                           vk::PipelineStageFlagBits::eTransfer );
 
         commandBuffers.at( i ).clearColorImage( swapchainImages.at( i ),
                                                 vk::ImageLayout::eTransferDstOptimal,
@@ -477,18 +417,18 @@ void fillCmdBuffersForPresentComposite
         vk::DependencyFlags(),
         {},
         {},
-        { //        { cmdBufferConf.bufferImageCopyMemoryBarier,
+        { cmdBufferConf.bufferImageCopyMemoryBarier,
           cmdBufferConf.imageMemoryBarierPresentToClear } );
 
-        //        commandBuffers.at( i ).setEvent( cmdBufferConf.needRefrashExtent,
-        //                                         vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eHost );
-        //
-        //        commandBuffers.at( i ).waitEvents( { cmdBufferConf.extentIsActual },
-        //                                           vk::PipelineStageFlagBits::eHost,
-        //                                           vk::PipelineStageFlagBits::eTransfer,
-        //                                           {},
-        //                                           {},
-        //                                           {} );
+        commandBuffers.at( i ).setEvent( cmdBufferConf.needRefrashExtent,
+                                         vk::PipelineStageFlagBits::eTransfer );
+
+        commandBuffers.at( i ).waitEvents( { cmdBufferConf.extentIsActual },
+                                           vk::PipelineStageFlagBits::eHost,
+                                           vk::PipelineStageFlagBits::eTransfer,
+                                           {},
+                                           {},
+                                           {} );
 
         commandBuffers.at( i ).blitImage( srcImage,
                                           vk::ImageLayout::eTransferSrcOptimal,
@@ -497,8 +437,115 @@ void fillCmdBuffersForPresentComposite
                                           srcToDstBlitRegions,
                                           vk::Filter::eLinear );
 
-        //        commandBuffers.at( i ).resetEvent( cmdBufferConf.extentIsActual,
-        //                                           vk::PipelineStageFlagBits::eTransfer );
+        commandBuffers.at( i ).resetEvent( cmdBufferConf.extentIsActual,
+                                           vk::PipelineStageFlagBits::eTransfer );
+
+        commandBuffers.at( i ).pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eBottomOfPipe,
+        vk::DependencyFlags(),
+        {},
+        {},
+        { cmdBufferConf.imageMemoryBarierClearToPresent } );
+
+        commandBuffers.at( i ).end();
+    }
+}
+
+void fillCmdBuffersCopyWindowsImagesToSwapchain [[maybe_unused]] (
+QueueFamilyIndex                           queueFamilyIndex,
+CommandBuffersVec &                        commandBuffers,
+ImageVec &                                 swapchainImages,
+VulkanGraphicRender::CmdBufferInitConfig & cmdBufferConf,
+const std::vector< VulkanGraphicRender::RamImageMapInfo::ImageInfoNode > &
+srcImageInfoNodes ) {
+    cmdBufferConf.srcImageUndefToTransferSrcOptimalBarier.srcQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.srcImageUndefToTransferSrcOptimalBarier.dstQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.srcImageUndefToTransferSrcOptimalBarier.subresourceRange =
+    cmdBufferConf.ranges.at( 0 );
+
+    cmdBufferConf.imageMemoryBarierPresentToClear.srcQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.imageMemoryBarierPresentToClear.dstQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.imageMemoryBarierPresentToClear.subresourceRange =
+    cmdBufferConf.ranges.at( 0 );
+
+    cmdBufferConf.imageMemoryBarierClearToPresent.srcQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.imageMemoryBarierClearToPresent.dstQueueFamilyIndex =
+    queueFamilyIndex;
+    cmdBufferConf.imageMemoryBarierClearToPresent.subresourceRange =
+    cmdBufferConf.ranges.at( 0 );
+
+    const vk::ClearColorValue clearColorValue(
+    std::array< float, 4 > { 0.5f, 0.5f, 0.5f, 1.0f } );
+
+    const std::array< const vk::ImageSubresourceRange, 1 > ranges {
+        vk::ImageSubresourceRange { .aspectMask   = vk::ImageAspectFlagBits::eColor,
+                                    .baseMipLevel = 0,
+                                    .levelCount   = 1,
+                                    .baseArrayLayer = 0,
+                                    .layerCount     = 1 }
+    };
+
+    for ( u32 i = 0; i < swapchainImages.size(); ++i ) {
+        cmdBufferConf.imageMemoryBarierClearToPresent.image =
+        swapchainImages.at( i );
+        cmdBufferConf.imageMemoryBarierPresentToClear.image =
+        swapchainImages.at( i );
+
+        commandBuffers.at( i ).begin( cmdBufferConf.cmdBufferBI );
+
+        commandBuffers.at( i ).pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::DependencyFlags(),
+        {},
+        {},
+        { cmdBufferConf.imageMemoryBarierPresentToClear } );
+
+        commandBuffers.at( i ).clearColorImage( swapchainImages.at( i ),
+                                                vk::ImageLayout::eTransferDstOptimal,
+                                                clearColorValue,
+                                                ranges );
+
+        commandBuffers.at( i ).pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::DependencyFlags(),
+        {},
+        {},
+        { cmdBufferConf.imageMemoryBarierPresentToClear } );
+
+        for ( auto & node : srcImageInfoNodes ) {
+            cmdBufferConf.srcImageUndefToTransferSrcOptimalBarier.image = node.image;
+
+            commandBuffers.at( i ).pipelineBarrier(
+            vk::PipelineStageFlagBits::eTransfer,
+            vk::PipelineStageFlagBits::eTransfer,
+            vk::DependencyFlags(),
+            {},
+            {},
+            { cmdBufferConf.srcImageUndefToTransferSrcOptimalBarier } );
+
+            commandBuffers.at( i ).blitImage( node.image,
+                                              vk::ImageLayout::eTransferSrcOptimal,
+                                              swapchainImages.at( i ),
+                                              vk::ImageLayout::eTransferDstOptimal,
+                                              node.blitRegions,
+                                              vk::Filter::eLinear );
+
+            commandBuffers.at( i ).pipelineBarrier(
+            vk::PipelineStageFlagBits::eTransfer,
+            vk::PipelineStageFlagBits::eTransfer,
+            vk::DependencyFlags(),
+            {},
+            {},
+            { cmdBufferConf.imageMemoryBarierPresentToClear } );
+        }
 
         commandBuffers.at( i ).pipelineBarrier(
         vk::PipelineStageFlagBits::eTransfer,
@@ -533,8 +580,7 @@ VulkanBase( baseInfo ),
 mXcbConnect( graphicRenderCreateInfo.xcbConnect ),
 mDstWindow( graphicRenderCreateInfo.dstXcbWindow ), /*
 mComposite( graphicRenderCreateInfo.xcbConnect )*/
-mCurrentSwapchainExtentMutex( std::make_unique< std::mutex >() ),
-mDpy( XOpenDisplay( nullptr ) ) {
+mCurrentSwapchainExtentMutex( std::make_unique< std::mutex >() ) {
     {
         vk::XcbSurfaceCreateInfoKHR surfaceCI { .connection = *mXcbConnect,
                                                 .window     = *mDstWindow };
@@ -545,93 +591,17 @@ mDpy( XOpenDisplay( nullptr ) ) {
     std::cout << "Discrete GPU is : " << mGpu.getProperties().deviceName << std::endl
               << std::endl;
 
-    //    {
-    //        auto dpysProps = mGpu.getDisplayPropertiesKHR();
-    //
-    //        std::cout << "Dysplays number is " << dpysProps.size() << std::endl
-    //                  << std::endl;
-    //
-    //        for ( auto && dpyProp : dpysProps ) {
-    //            std::cout << "Display name is " << dpyProp.displayName << std::endl
-    //                      << "Display resolution is " << dpyProp.physicalResolution.width
-    //                      << "x" << dpyProp.physicalResolution.height << std::endl;
-    //        }
-    //
-    //        std::cout << "Display supported transforms is "
-    //                  << vk::to_string( dpysProps.at( 0 ).supportedTransforms )
-    //                  << std::endl;
-    //
-    //        auto planesProps = mGpu.getDisplayPlanePropertiesKHR();
-    //
-    //        std::cout << "Planes count is " << planesProps.size() << std::endl;
-    //
-    //        std::cout << std::endl;
-    //
-    //        auto dpy0 = dpysProps.at( 0 ).display;
-    //
-    //        std::uint32_t stackIndex {};
-    //        std::uint32_t planeIndex {};
-    //        for ( ; planeIndex < planesProps.size(); ++planeIndex ) {
-    //            if ( planesProps.at( planeIndex ).currentDisplay == dpy0 ) {
-    //                std::cout << planesProps.at( planeIndex ).currentStackIndex
-    //                          << std::endl;
-    //                stackIndex = planesProps.at( planeIndex ).currentStackIndex;
-    //                break;
-    //            }
-    //        }
-    //
-    //        //if (planeIndex >= planesProps.size())
-    //        //    throw std::runtime_error("Plane is not found!!!");
-    //
-    //        std::cout << std::endl;
-    //
-    //        std::cout << "Plane index is " << planeIndex << std::endl << std::endl;
-    //        std::cout << "Plane stack index is " << stackIndex << std::endl << std::endl;
-    //
-    //        auto dpy0ModeProps = mGpu.getDisplayModePropertiesKHR( dpy0 );
-    //
-    //        for ( auto && dpy0ModeProp : dpy0ModeProps )
-    //            std::cout << "Mode " << dpy0ModeProp.parameters.visibleRegion.width
-    //                      << "x" << dpy0ModeProp.parameters.visibleRegion.height << " "
-    //                      << dpy0ModeProp.parameters.refreshRate << std::endl;
-    //
-    //        //auto axd = PFN_vkAcquireXlibDisplayEXT(
-    //        //vkGetInstanceProcAddr( mInstance, "vkAcquireXlibDisplayEXT" ) );
-    //        //auto res = axd( mGpu, mDpy, dpy0 );
-    //        //if ( res != VK_SUCCESS )
-    //        //    throw std::runtime_error( "Display is not allowed " +
-    //        //                              std::to_string( res ) );
-    //
-    //        //if ( mGpu.acquireXlibDisplayEXT( mDpy, dpy0 ) != vk::Result::eSuccess )
-    //        //    throw std::runtime_error( "Display is not allowed" );
-    //        //
-    //        //RROutput rr{};
-    //        //dpy0 = mGpu.getRandROutputDisplayEXT( *mDpy, rr ) ;
-    //
-    //        vk::DisplaySurfaceCreateInfoKHR displaySurfaceCI {
-    //            .flags           = {},
-    //            .displayMode     = dpy0ModeProps.at( 0 ).displayMode,
-    //            .planeIndex      = planeIndex,
-    //            .planeStackIndex = 8,
-    //            .transform       = vk::SurfaceTransformFlagBitsKHR::eIdentity,
-    //            .globalAlpha     = 0.5f,
-    //            .alphaMode       = vk::DisplayPlaneAlphaFlagBitsKHR::eGlobal,
-    //            .imageExtent     = dpysProps.at( 0 ).physicalResolution
-    //        };
-    //
-    //        mSurface = mInstance.createDisplayPlaneSurfaceKHR( displaySurfaceCI );
-    //    }
-
     mQueueConfigs.emplace_back(
     QueueTypeConfig { .queueFamilyIndex = getGraphicsQueueFamilyIndex( mGpu ),
                       .priorities       = QueuesPrioritiesVec { 1.0f } } );
 
     if ( !mGpu.getSurfaceSupportKHR( mQueueConfigs.at( 0 ).queueFamilyIndex,
                                      mSurface ) )
-        throw std::runtime_error( "ERROR: Surface cann't support queueFamilyIndex!!!" );
+        throw std::runtime_error(
+        "ERROR: Surface cann't support queueFamilyIndex!!!" );
 
     printSurfaceExtents();
-    throw std::runtime_error( "********* TEST ********" );
+    //throw std::runtime_error( "********* TEST ********" );
 
     {
         std::vector< vk::DeviceQueueCreateInfo > deviceQueueCreateInfos;
@@ -643,16 +613,17 @@ mDpy( XOpenDisplay( nullptr ) ) {
 
         vk::DeviceCreateInfo deviceCreateInfo {
             .queueCreateInfoCount =
-            static_cast< std::uint32_t >( deviceQueueCreateInfos.size() ),
-            .pQueueCreateInfos = deviceQueueCreateInfos.data(),
-            .enabledExtensionCount =
-            static_cast< std::uint32_t >( mExtansions.device.size() ),
+            static_cast< u32 >( deviceQueueCreateInfos.size() ),
+            .pQueueCreateInfos     = deviceQueueCreateInfos.data(),
+            .enabledExtensionCount = static_cast< u32 >( mExtansions.device.size() ),
             .ppEnabledExtensionNames = mExtansions.device.data(),
             .pEnabledFeatures        = &gpuFeatures
         };
 
         mLogicDev = mGpu.createDevice( deviceCreateInfo );
+        VULKAN_HPP_DEFAULT_DISPATCHER.init( mInstance, mLogicDev );
     }
+
     mQueues.push_back(
     mLogicDev.getQueue( mQueueConfigs.at( 0 ).queueFamilyIndex, 0 ) );
 
@@ -696,169 +667,125 @@ mDpy( XOpenDisplay( nullptr ) ) {
 
     {
         composite::Composite srcComposite( graphicRenderCreateInfo.xcbConnect );
-        mSrcRamInfo.window = srcComposite.getRootWindow();
-        if ( !mSrcRamInfo.window->getProperties().isViewable() )
-            throw std::runtime_error( "Selected overlay window id not viewvable" );
-        std::cout << "Selected window: "
-                  << mSrcRamInfo.window->getProperties().getClass() << std::endl
-                  << "with id: " << mSrcRamInfo.window->getProperties().getID()
-                  << std::endl;
+        mSrcRamInfo.windows = srcComposite.getRedirectedWindows();
     }
 
-    {
-        xcbwraper::AtomNetClientList clientList {};
-        auto                         clientsVec = clientList.get();
+    auto physDevProperties =
+    mGpu.getProperties2< vk::PhysicalDeviceProperties2,
+                         vk::PhysicalDeviceMaintenance3Properties,
+                         vk::PhysicalDeviceExternalMemoryHostPropertiesEXT >();
 
-        for ( auto && client : clientsVec )
-            std::cout << "TEST POINT " << client.getID() << std::endl
-                      << client.getClass() << std::endl
+    auto maxAllocSize =
+    physDevProperties.get< vk::PhysicalDeviceMaintenance3Properties >()
+    .maxMemoryAllocationSize;
+
+    std::cout << std::endl << "Max alloc size is " << maxAllocSize << std::endl;
+
+    for ( auto & window : mSrcRamInfo.windows ) {
+        try {
+            std::cout << std::endl
+                      << "Window name is " << window->getProperties().getClass()
+                      << " id " << window->getProperties().getID()
                       << std::endl;
 
-        xcbwraper::XcbConnectionShared connection =
-        std::make_shared< xcbwraper::XCBConnection >();
+            auto srcWindowGeometry = window->getProperties().getGeometry();
 
-        xcbwraper::Window::CreateInfo windowCI { .connection = connection };
+            //mSrcBufferImgCopyRegions = initBufferImageCopyRegions( mSrcRamInfo.windows );
 
-        constexpr std::string_view searchWindowClass( "Alacritty" );
+            constexpr vk::ExternalMemoryHandleTypeFlagBits externalMemFlagBit {
+                vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT
+            };
 
-        for ( auto && client : clientsVec )
-            if ( client.getClass() == searchWindowClass )
-                windowCI.window = client.getID();
-        mSrcRamInfo.window = std::make_shared< xcbwraper::Window >( windowCI );
+            vk::ExternalMemoryImageCreateInfo externalMemCI { .handleTypes =
+                                                              externalMemFlagBit };
+
+            auto srcImageCI = vk::ImageCreateInfo {
+                .pNext     = &externalMemCI,
+                .flags     = {},
+                .imageType = vk::ImageType::e2D,
+                //.format      = mSurfaceFormat.format,
+                .format      = vk::Format::eR8G8B8A8Unorm,
+                .extent      = vk::Extent3D { .width  = srcWindowGeometry.width,
+                                         .height = srcWindowGeometry.height,
+                                         .depth  = 1 },
+                .mipLevels   = 1,
+                .arrayLayers = 1,
+                //.tiling      = vk::ImageTiling::eLinear,
+                .usage                 = vk::ImageUsageFlagBits::eTransferSrc,
+                .sharingMode           = vk::SharingMode::eExclusive,
+                .queueFamilyIndexCount = 1,
+                .pQueueFamilyIndices   = &mQueueConfigs.at( 0 ).queueFamilyIndex,
+                .initialLayout         = vk::ImageLayout::eUndefined
+            };
+
+            auto image = mLogicDev.createImage( srcImageCI );
+
+            //xcbwraper::PixmapData pixmapData;
+            //auto pixmapData = window->getOffscreenImageData().getData();
+            auto pixmapData = window->getOffscreenShmImageData()->getData<u8>();
+
+            std::cout << std::endl
+                      << "Data ptr is " << static_cast< void * >( pixmapData.data() )
+                      << std::endl;
+
+            auto blitRegion = initImageBlitRegion( window );
+
+            auto imageRequarements = mLogicDev.getMemoryHostPointerPropertiesEXT(
+            externalMemFlagBit, pixmapData.data() );
+
+            vk::DeviceSize pixmapDataSize = pixmapData.size_bytes();
+            //            mLogicDev.getImageMemoryRequirements( image ).size;
+
+            const auto allocAligment =
+            physDevProperties
+            .get< vk::PhysicalDeviceExternalMemoryHostPropertiesEXT >()
+            .minImportedHostPointerAlignment;
+
+            auto allocSize = ( pixmapDataSize / allocAligment + 1 ) * allocAligment;
+
+            std::cout << std::endl
+                      << "Pixmap size is " << pixmapDataSize << std::endl;
+            std::cout << std::endl << "Alloc size is " << allocSize << std::endl;
+
+            constexpr vk::MemoryPropertyFlags memReqFlags {
+                //                vk::MemoryPropertyFlagBits::eHostCached |
+                vk::MemoryPropertyFlagBits::eHostVisible   // |
+                //    vk::MemoryPropertyFlagBits::eDeviceLocal
+            };
+
+            auto imageMemTypeIndex =
+            getMemTypeIndex( mGpu, imageRequarements.memoryTypeBits, memReqFlags );
+
+            vk::ImportMemoryHostPointerInfoEXT importHostPtrMemInfo {
+                //    .pNext        = &memOpaqueCapturedAddress,
+                .handleType   = externalMemFlagBit,
+                .pHostPointer = pixmapData.data()
+            };
+
+            //vk::MemoryOpaqueCaptureAddressAllocateInfo memOpaqueCapturedAddress {
+            //    .pNext = &importHostPtrMemInfo, .opaqueCaptureAddress = 0
+            //};
+
+            vk::MemoryAllocateInfo memAllocInfo { .pNext = &importHostPtrMemInfo,
+                                                  .allocationSize = allocSize,
+                                                  .memoryTypeIndex =
+                                                  imageMemTypeIndex };
+
+            auto imageRam = mLogicDev.allocateMemory( memAllocInfo );
+
+            mLogicDev.bindImageMemory( image, imageRam, 0 );
+
+            mSrcRamInfo.imageInfoNodes.emplace_back(
+            image, imageRam, xcbwraper::PixmapData {}, blitRegion );
+        } catch ( std::exception & e ) { std::cout << e.what() << std::endl; }
     }
 
-    {
-        auto bitPerRgb = mSrcRamInfo.window->getProperties().getBitPerRGB() * 3;
+    //    auto & blitRegion0DstOffset1 = mSrcToDstBlitRegions.at( 0 ).dstOffsets.at( 1 );
+    //    auto   surfaceExtents = mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent;
+    //    blitRegion0DstOffset1.x = surfaceExtents.width;
+    //    blitRegion0DstOffset1.y = surfaceExtents.height;
 
-        std::cout << "SrcWindow has " << static_cast< std::uint32_t >( bitPerRgb )
-                  << " bit per rgb." << std::endl;
-
-        auto srcWindowGeometry = mSrcRamInfo.window->getProperties().getGeometry();
-
-        mSrcBufferImgCopyRegions = initBufferImageCopyRegions( mSrcRamInfo.window );
-
-        vk::ExternalMemoryImageCreateInfo externalMemCI {
-            .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT
-        };
-
-        auto srcImageCI = vk::ImageCreateInfo {
-            .pNext     = &externalMemCI,
-            .flags     = {},
-            .imageType = vk::ImageType::e2D,
-            //.format      = mSurfaceFormat.format,
-            .format      = vk::Format::eR8G8B8A8Unorm,
-            .extent      = vk::Extent3D { .width  = srcWindowGeometry.width,
-                                     .height = srcWindowGeometry.height,
-                                     .depth  = 1 },
-            .mipLevels   = 1,
-            .arrayLayers = 1,
-            .tiling      = vk::ImageTiling::eOptimal,
-            .usage       = vk::ImageUsageFlagBits::eTransferDst |
-                     vk::ImageUsageFlagBits::eTransferSrc,
-            .sharingMode           = vk::SharingMode::eExclusive,
-            .queueFamilyIndexCount = 1,
-            .pQueueFamilyIndices   = &mQueueConfigs.at( 0 ).queueFamilyIndex,
-            .initialLayout         = vk::ImageLayout::eUndefined
-        };
-        mSrcRamInfo.image = mLogicDev.createImage( srcImageCI );
-
-        auto dri3Fd = mSrcRamInfo.window->getImageDataDri3FD();
-        auto dmaFd  = dri3Fd.getFd();
-
-        auto getMemFdProps = PFN_vkGetMemoryFdPropertiesKHR(
-        vkGetDeviceProcAddr( mLogicDev, "vkGetMemoryFdPropertiesKHR" ) );
-
-        VkMemoryFdPropertiesKHR memFdProps;
-        getMemFdProps( mLogicDev,
-                       VkExternalMemoryHandleTypeFlagBits::
-                       VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
-                       dmaFd,
-                       &memFdProps );
-
-        //auto memFdProps = mLogicDev.getMemoryFdPropertiesKHR(
-        //vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT, dmaFd );
-
-        auto srcImageMemReq =
-        mLogicDev.getImageMemoryRequirements( mSrcRamInfo.image );
-
-        vk::MemoryDedicatedAllocateInfo memDedicatedAllocInfo { .image =
-                                                                mSrcRamInfo.image };
-
-        vk::ImportMemoryFdInfoKHR importMemFdInfo {
-            .pNext      = &memDedicatedAllocInfo,
-            .handleType = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT,
-            .fd         = dmaFd
-        };
-
-        std::uint32_t memTypeIndex {};
-        for ( ; memTypeIndex < 32; ++memTypeIndex )
-            if ( memFdProps.memoryTypeBits & ( 1 << memTypeIndex ) )
-                break;
-
-        if ( memTypeIndex >= 32 )
-            throw std::runtime_error( "memFdTypeIndex is bad!!!" );
-
-        vk::MemoryAllocateInfo memAllocInfo { .pNext           = &importMemFdInfo,
-                                              .allocationSize  = srcImageMemReq.size,
-                                              .memoryTypeIndex = memTypeIndex };
-
-        mSrcRamInfo.imageRam = mLogicDev.allocateMemory( memAllocInfo );
-
-        mLogicDev.bindImageMemory( mSrcRamInfo.image, mSrcRamInfo.imageRam, 0 );
-
-        const vk::DeviceSize bufferSize =
-        srcWindowGeometry.height * srcWindowGeometry.width * bitPerRgb;
-
-        const vk::BufferUsageFlags bufferUsageFlags {
-            vk::BufferUsageFlagBits::eTransferDst |
-            vk::BufferUsageFlagBits::eTransferSrc
-        };
-
-        vk::BufferCreateInfo srcBufferCI { .size  = bufferSize,
-                                           .usage = bufferUsageFlags,
-                                           .sharingMode =
-                                           vk::SharingMode::eExclusive,
-                                           .queueFamilyIndexCount = 1,
-                                           .pQueueFamilyIndices =
-                                           &mQueueConfigs.at( 0 ).queueFamilyIndex };
-        mSrcRamInfo.imageBuffer = mLogicDev.createBuffer( srcBufferCI );
-    }
-
-    //    {
-    //        constexpr vk::MemoryPropertyFlags memReqFlags {
-    //            vk::MemoryPropertyFlagBits::eDeviceLocal
-    //        };
-    //
-    //        mSrcRamInfo.imageRam =
-    //        createMemAndBind( mGpu, mLogicDev, mSrcRamInfo.image, memReqFlags );
-    //    }
-    //
-    //    {
-    //        constexpr vk::MemoryPropertyFlags memReqFlags {
-    //            vk::MemoryPropertyFlagBits::eHostVisible |
-    //            vk::MemoryPropertyFlagBits::eDeviceLocal
-    //        };
-    //
-    //        const auto memRequarements =
-    //        mLogicDev.getBufferMemoryRequirements( mSrcRamInfo.imageBuffer );
-    //
-    //        mSrcRamInfo.imageBufferRam =
-    //        createMemAndBind( mGpu, mLogicDev, mSrcRamInfo.imageBuffer, memReqFlags );
-    //
-    //        mSrcRamInfo.imageDataBridge =
-    //        mLogicDev.mapMemory( mSrcRamInfo.imageBufferRam, 0, memRequarements.size );
-    //        //
-    //        //        mLogicDev.unmapMemory( mSrcRamInfo.imageBufferRam );
-    //    }
-
-    mSrcToDstBlitRegions = initImageBlitRegions( mSrcRamInfo.window, mDstWindow );
-
-    auto & blitRegion0DstOffset1 = mSrcToDstBlitRegions.at( 0 ).dstOffsets.at( 1 );
-    auto   surfaceExtents = mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent;
-    blitRegion0DstOffset1.x = surfaceExtents.width;
-    blitRegion0DstOffset1.y = surfaceExtents.height;
-
-    mSrcRamInfo.imageShm = std::make_shared< posix::SharedMemory >();
+    //    mSrcRamInfo.imageShm = std::make_shared< posix::SharedMemory >();
 
     vk::EventCreateInfo eventCI { .flags = {} };
 
@@ -866,51 +793,12 @@ mDpy( XOpenDisplay( nullptr ) ) {
     mCmdConfig.extentIsActual    = mLogicDev.createEvent( eventCI );
     mCmdConfig.needRefrashExtent = mLogicDev.createEvent( eventCI );
 
-    //    mThreadPool.blitRegionsResizer = std::thread( [ this ]() {
-    //        auto & blitRegion0DstOffset1 =
-    //        mSrcToDstBlitRegions.at( 0 ).dstOffsets.at( 1 );
-    //
-    //        while ( true ) {
-    //            while ( mLogicDev.getEventStatus( mCmdConfig.needRefrashExtent ) !=
-    //                    vk::Result::eEventSet ) {
-    //                using namespace std::chrono_literals;
-    //                std::this_thread::sleep_for( 100us );
-    //            }
-    //
-    //            mCurrentSurfaceExtent =
-    //            mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent;
-    //
-    //            {
-    //                const std::scoped_lock< std::mutex > lockSwapchainExtent(
-    //                *mCurrentSwapchainExtentMutex );
-    //
-    //                blitRegion0DstOffset1.y = std::min( mCurrentSurfaceExtent.height,
-    //                                                    mCurrentSwapchainExtent.height );
-    //
-    //                blitRegion0DstOffset1.x = std::min( mCurrentSurfaceExtent.width,
-    //                                                    mCurrentSwapchainExtent.width );
-    //
-    //                mLogicDev.setEvent( mCmdConfig.extentIsActual );
-    //
-    //                mLogicDev.resetEvent( mCmdConfig.needRefrashExtent );
-    //
-    //                mCurrentSwapchainExtent = mCurrentSurfaceExtent;
-    //            }
-    //            //            using namespace std::chrono_literals;
-    //            //            std::this_thread::sleep_for( 100us );
-    //        }
-    //    } );
-    //
-    //    mThreadPool.blitRegionsResizer.detach();
-
-    fillCmdBuffersForPresentComposite( mQueueConfigs.at( 0 ).queueFamilyIndex,
-                                       mSwapchainCmdBuffers,
-                                       mSwapchainImages,
-                                       mCmdConfig,
-                                       mSrcRamInfo.imageBuffer,
-                                       mSrcRamInfo.image,
-                                       mSrcToDstBlitRegions,
-                                       mSrcBufferImgCopyRegions );
+    fillCmdBuffersCopyWindowsImagesToSwapchain(
+    mQueueConfigs.at( 0 ).queueFamilyIndex,
+    mSwapchainCmdBuffers,
+    mSwapchainImages,
+    mCmdConfig,
+    mSrcRamInfo.imageInfoNodes );
 
     //    mDstWindow->unmap();
 
@@ -921,14 +809,17 @@ mDpy( XOpenDisplay( nullptr ) ) {
               << "Image count : " << mSwapchainImages.size() << std::endl;
 }
 
-VulkanGraphicRender::~VulkanGraphicRender() {}
+VulkanGraphicRender::~VulkanGraphicRender() {
+    for ( auto & window : mSrcRamInfo.windows )
+        window->detach();
+}
 
 void VulkanGraphicRender::draw() {
     try {
         mLogicDev.waitIdle();
 
-        constexpr std::uint64_t waitTimeNanoSeconds = 10;
-        const auto              asqNextImgIndex     = mLogicDev.acquireNextImageKHR(
+        constexpr u64 waitTimeNanoSeconds = 10;
+        const auto    asqNextImgIndex     = mLogicDev.acquireNextImageKHR(
         mSwapchain, waitTimeNanoSeconds, mSemaphores.at( 0 ) );
 
         if ( asqNextImgIndex.result != vk::Result::eSuccess )
@@ -946,15 +837,14 @@ void VulkanGraphicRender::draw() {
         auto & queue0 = mQueues.at( 0 );
         queue0.submit( mDrawConf.subInfo );
 
-        {
-            mSrcRamInfo.imageShm =
-            mSrcRamInfo.window->getImageData( mSrcRamInfo.imageShm );
-
-            std::copy(
-            mSrcRamInfo.imageShm->getData< std::uint8_t >().begin(),
-            mSrcRamInfo.imageShm->getData< std::uint8_t >().end(),
-            static_cast< std::uint8_t * >( mSrcRamInfo.imageDataBridge ) );
-        }
+        //        {
+        //            mSrcRamInfo.imageShm =
+        //            mSrcRamInfo.window->getOffscreenImageData( mSrcRamInfo.imageShm );
+        //
+        //            std::copy( mSrcRamInfo.imageShm->getData< u8 >().begin(),
+        //                       mSrcRamInfo.imageShm->getData< u8 >().end(),
+        //                       static_cast< u8 * >( mSrcRamInfo.imageDataBridge ) );
+        //        }
 
         mLogicDev.setEvent( mCmdConfig.bufferImageCopied );
 
@@ -1018,14 +908,12 @@ void VulkanGraphicRender::update() {
     //    blitRegion0DstOffset1.x =
     //    mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent.width;
 
-    fillCmdBuffersForPresentComposite( mQueueConfigs.at( 0 ).queueFamilyIndex,
-                                       mSwapchainCmdBuffers,
-                                       mSwapchainImages,
-                                       mCmdConfig,
-                                       mSrcRamInfo.imageBuffer,
-                                       mSrcRamInfo.image,
-                                       mSrcToDstBlitRegions,
-                                       mSrcBufferImgCopyRegions );
+    fillCmdBuffersCopyWindowsImagesToSwapchain(
+    mQueueConfigs.at( 0 ).queueFamilyIndex,
+    mSwapchainCmdBuffers,
+    mSwapchainImages,
+    mCmdConfig,
+    mSrcRamInfo.imageInfoNodes );
 }
 
 void VulkanGraphicRender::printSurfaceExtents() const {
@@ -1093,9 +981,7 @@ void VulkanRenderInstance::run() const {
     .data;
     assert( screen != nullptr && "xcb_setup_roots_iterator return nullptr" );
 
-    std::uint32_t winValList[] = {
-        /*XCB_EVENT_MASK_EXPOSURE |*/ XCB_EVENT_MASK_KEY_PRESS
-    };
+    u32 winValList[] = { /*XCB_EVENT_MASK_EXPOSURE |*/ XCB_EVENT_MASK_KEY_PRESS };
 
     xcb_window_t window =
     xcb_generate_id( static_cast< xcb_connection_t * >( *mXcbConnect ) );
@@ -1131,26 +1017,32 @@ void VulkanRenderInstance::run() const {
                       //VK_EXT_DIRECT_MODE_DISPLAY_EXTENSION_NAME,
                       /*VK_EXT_ACQUIRE_XLIB_DISPLAY_EXTENSION_NAME */ },
         .device   = { VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-                    VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME }
+                    VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME }
     };
 
+    vk::DynamicLoader         dl;
+    PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr =
+    dl.getProcAddress< PFN_vkGetInstanceProcAddr >( "vkGetInstanceProcAddr" );
+    VULKAN_HPP_DEFAULT_DISPATCHER.init( vkGetInstanceProcAddr );
+
     vk::Instance vulkanXCBInstance = vk::createInstance( vk::InstanceCreateInfo {
-    .pApplicationInfo = appInfo.get(),
-    .enabledExtensionCount =
-    static_cast< std::uint32_t >( extensions.instance.size() ),
+    .pApplicationInfo        = appInfo.get(),
+    .enabledExtensionCount   = static_cast< u32 >( extensions.instance.size() ),
     .ppEnabledExtensionNames = extensions.instance.data() } );
+
+    VULKAN_HPP_DEFAULT_DISPATCHER.init( vulkanXCBInstance );
 
     auto                   gpu = getDiscreteGpu( vulkanXCBInstance );
     VulkanBase::CreateInfo vulkanBaseCI { .instance   = vulkanXCBInstance,
                                           .physDev    = gpu,
                                           .extansions = extensions };
 
-    //    auto composite = std::make_shared< composite::Composite >( mXcbConnect );
-    //
-    //    auto windowPtr = composite->getCompositeOverleyWindowWithoutInputEvents();
+    auto composite = std::make_shared< composite::Composite >( mXcbConnect );
 
-    auto windowPtr = std::make_shared< xcbwraper::Window >(
-    xcbwraper::Window::CreateInfo { mXcbConnect, window } );
+    auto windowPtr = composite->getCompositeOverleyWindowWithoutInputEvents();
+
+    //auto windowPtr = std::make_shared< xcbwraper::Window >(
+    //xcbwraper::Window::CreateInfo { mXcbConnect, window } );
 
     VulkanGraphicRender::CreateInfo vulkanRenderCI { .xcbConnect   = mXcbConnect,
                                                      .dstXcbWindow = windowPtr };
@@ -1164,5 +1056,221 @@ void VulkanRenderInstance::run() const {
 
     //    xcb_destroy_window( static_cast< xcb_connection_t * >( *mXcbConnect ), window );
     //    xcb_flush( static_cast< xcb_connection_t * >( *mXcbConnect ) );
+}
+
+void unusedCode() {
+    //    {
+    //        auto dpysProps = mGpu.getDisplayPropertiesKHR();
+    //
+    //        std::cout << "Dysplays number is " << dpysProps.size() << std::endl
+    //                  << std::endl;
+    //
+    //        for ( auto && dpyProp : dpysProps ) {
+    //            std::cout << "Display name is " << dpyProp.displayName << std::endl
+    //                      << "Display resolution is " << dpyProp.physicalResolution.width
+    //                      << "x" << dpyProp.physicalResolution.height << std::endl;
+    //        }
+    //
+    //        std::cout << "Display supported transforms is "
+    //                  << vk::to_string( dpysProps.at( 0 ).supportedTransforms )
+    //                  << std::endl;
+    //
+    //        auto planesProps = mGpu.getDisplayPlanePropertiesKHR();
+    //
+    //        std::cout << "Planes count is " << planesProps.size() << std::endl;
+    //
+    //        std::cout << std::endl;
+    //
+    //        auto dpy0 = dpysProps.at( 0 ).display;
+    //
+    //        u32 stackIndex {};
+    //        u32 planeIndex {};
+    //        for ( ; planeIndex < planesProps.size(); ++planeIndex ) {
+    //            if ( planesProps.at( planeIndex ).currentDisplay == dpy0 ) {
+    //                std::cout << planesProps.at( planeIndex ).currentStackIndex
+    //                          << std::endl;
+    //                stackIndex = planesProps.at( planeIndex ).currentStackIndex;
+    //                break;
+    //            }
+    //        }
+    //
+    //        //if (planeIndex >= planesProps.size())
+    //        //    throw std::runtime_error("Plane is not found!!!");
+    //
+    //        std::cout << std::endl;
+    //
+    //        std::cout << "Plane index is " << planeIndex << std::endl << std::endl;
+    //        std::cout << "Plane stack index is " << stackIndex << std::endl << std::endl;
+    //
+    //        auto dpy0ModeProps = mGpu.getDisplayModePropertiesKHR( dpy0 );
+    //
+    //        for ( auto && dpy0ModeProp : dpy0ModeProps )
+    //            std::cout << "Mode " << dpy0ModeProp.parameters.visibleRegion.width
+    //                      << "x" << dpy0ModeProp.parameters.visibleRegion.height << " "
+    //                      << dpy0ModeProp.parameters.refreshRate << std::endl;
+    //
+    //        //auto axd = PFN_vkAcquireXlibDisplayEXT(
+    //        //vkGetInstanceProcAddr( mInstance, "vkAcquireXlibDisplayEXT" ) );
+    //        //auto res = axd( mGpu, mDpy, dpy0 );
+    //        //if ( res != VK_SUCCESS )
+    //        //    throw std::runtime_error( "Display is not allowed " +
+    //        //                              std::to_string( res ) );
+    //
+    //        //if ( mGpu.acquireXlibDisplayEXT( mDpy, dpy0 ) != vk::Result::eSuccess )
+    //        //    throw std::runtime_error( "Display is not allowed" );
+    //        //
+    //        //RROutput rr{};
+    //        //dpy0 = mGpu.getRandROutputDisplayEXT( *mDpy, rr ) ;
+    //
+    //        vk::DisplaySurfaceCreateInfoKHR displaySurfaceCI {
+    //            .flags           = {},
+    //            .displayMode     = dpy0ModeProps.at( 0 ).displayMode,
+    //            .planeIndex      = planeIndex,
+    //            .planeStackIndex = 8,
+    //            .transform       = vk::SurfaceTransformFlagBitsKHR::eIdentity,
+    //            .globalAlpha     = 0.5f,
+    //            .alphaMode       = vk::DisplayPlaneAlphaFlagBitsKHR::eGlobal,
+    //            .imageExtent     = dpysProps.at( 0 ).physicalResolution
+    //        };
+    //
+    //        mSurface = mInstance.createDisplayPlaneSurfaceKHR( displaySurfaceCI );
+    //    }
+
+    //        auto dri3Fd = mSrcRamInfo.window->getImageDataDri3FD();
+    //        auto dmaFd  = dri3Fd.getFd();
+    //
+    //        auto getMemFdProps = PFN_vkGetMemoryFdPropertiesKHR(
+    //        vkGetDeviceProcAddr( mLogicDev, "vkGetMemoryFdPropertiesKHR" ) );
+    //
+    //        VkMemoryFdPropertiesKHR memFdProps;
+    //        getMemFdProps( mLogicDev,
+    //                       VkExternalMemoryHandleTypeFlagBits::
+    //                       VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    //                       dmaFd,
+    //                       &memFdProps );
+
+    //auto memFdProps = mLogicDev.getMemoryFdPropertiesKHR(
+    //vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT, dmaFd );
+
+    //        auto srcImageMemReq =
+    //        mLogicDev.getImageMemoryRequirements( mSrcRamInfo.image );
+
+    //        vk::MemoryDedicatedAllocateInfo memDedicatedAllocInfo { .image =
+    //                                                                mSrcRamInfo.image };
+    //
+    //        vk::ImportMemoryFdInfoKHR importMemFdInfo {
+    //            .pNext      = &memDedicatedAllocInfo,
+    //            .handleType = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT,
+    //            .fd         = dmaFd
+    //        };
+
+    //        u32 memTypeIndex {};
+    //        for ( ; memTypeIndex < 32; ++memTypeIndex )
+    //            if ( memFdProps.memoryTypeBits & ( 1 << memTypeIndex ) )
+    //                break;
+    //
+    //        if ( memTypeIndex >= 32 )
+    //            throw std::runtime_error( "memFdTypeIndex is bad!!!" );
+
+    //        vk::MemoryAllocateInfo memAllocInfo { .pNext           = &importMemFdInfo,
+    //                                              .allocationSize  = srcImageMemReq.size,
+    //                                              .memoryTypeIndex = memTypeIndex };
+
+    //        mSrcRamInfo.imageRam = mLogicDev.allocateMemory( memAllocInfo );
+
+    //        mLogicDev.bindImageMemory( mSrcRamInfo.image, mSrcRamInfo.imageRam, 0 );
+
+    //{
+    //    xcbwraper::AtomNetClientList clientList {};
+    //    auto                         clientsVec = clientList.get();
+
+    //    for ( auto && client : clientsVec )
+    //        std::cout << "TEST POINT " << client.getID() << std::endl
+    //                  << client.getClass() << std::endl
+    //                  << std::endl;
+
+    //    xcbwraper::XcbConnectionShared connection =
+    //    std::make_shared< xcbwraper::XCBConnection >();
+
+    //    xcbwraper::Window::CreateInfo windowCI { .connection = connection };
+
+    //    constexpr std::string_view searchWindowClass( "Alacritty" );
+
+    //    for ( auto && client : clientsVec )
+    //        if ( client.getClass() == searchWindowClass )
+    //            windowCI.window = client.getID();
+    //    mSrcRamInfo.window = std::make_shared< xcbwraper::Window >( windowCI );
+    //}
+
+    //{
+    //            const vk::BufferUsageFlags bufferUsageFlags {
+    //        vk::BufferUsageFlagBits::eTransferDst |
+    //        vk::BufferUsageFlagBits::eTransferSrc
+    //    };
+
+    //    vk::BufferCreateInfo srcBufferCI { .size  = bufferSize,
+    //                                       .usage = bufferUsageFlags,
+    //                                       .sharingMode =
+    //                                       vk::SharingMode::eExclusive,
+    //                                       .queueFamilyIndexCount = 1,
+    //                                       .pQueueFamilyIndices =
+    //                                       &mQueueConfigs.at( 0 ).queueFamilyIndex };
+    //    mSrcRamInfo.imageBuffer = mLogicDev.createBuffer( srcBufferCI );
+    //}
+
+    //    {
+    //        constexpr vk::MemoryPropertyFlags memReqFlags {
+    //            vk::MemoryPropertyFlagBits::eHostVisible |
+    //            vk::MemoryPropertyFlagBits::eDeviceLocal
+    //        };
+    //
+    //        const auto memRequarements =
+    //        mLogicDev.getBufferMemoryRequirements( mSrcRamInfo.imageBuffer );
+    //
+    //        mSrcRamInfo.imageBufferRam =
+    //        createMemAndBind( mGpu, mLogicDev, mSrcRamInfo.imageBuffer, memReqFlags );
+    //
+    //        mSrcRamInfo.imageDataBridge =
+    //        mLogicDev.mapMemory( mSrcRamInfo.imageBufferRam, 0, memRequarements.size );
+    //        //
+    //        //        mLogicDev.unmapMemory( mSrcRamInfo.imageBufferRam );
+    //    }
+
+    //    mThreadPool.blitRegionsResizer = std::thread( [ this ]() {
+    //        auto & blitRegion0DstOffset1 =
+    //        mSrcToDstBlitRegions.at( 0 ).dstOffsets.at( 1 );
+    //
+    //        while ( true ) {
+    //            while ( mLogicDev.getEventStatus( mCmdConfig.needRefrashExtent ) !=
+    //                    vk::Result::eEventSet ) {
+    //                using namespace std::chrono_literals;
+    //                std::this_thread::sleep_for( 100us );
+    //            }
+    //
+    //            mCurrentSurfaceExtent =
+    //            mGpu.getSurfaceCapabilitiesKHR( mSurface ).currentExtent;
+    //
+    //            {
+    //                const std::scoped_lock< std::mutex > lockSwapchainExtent(
+    //                *mCurrentSwapchainExtentMutex );
+    //
+    //                blitRegion0DstOffset1.y = std::min( mCurrentSurfaceExtent.height,
+    //                                                    mCurrentSwapchainExtent.height );
+    //
+    //                blitRegion0DstOffset1.x = std::min( mCurrentSurfaceExtent.width,
+    //                                                    mCurrentSwapchainExtent.width );
+    //
+    //                mLogicDev.setEvent( mCmdConfig.extentIsActual );
+    //
+    //                mLogicDev.resetEvent( mCmdConfig.needRefrashExtent );
+    //
+    //                mCurrentSwapchainExtent = mCurrentSurfaceExtent;
+    //            }
+    //            //            using namespace std::chrono_literals;
+    //            //            std::this_thread::sleep_for( 100us );
+    //        }
+    //    } );
+    //
+    //    mThreadPool.blitRegionsResizer.detach();
 }
 }   // namespace core::renderer

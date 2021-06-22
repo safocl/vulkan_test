@@ -1,6 +1,7 @@
 #include <bits/stdint-uintn.h>
 #include <exception>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -34,6 +35,27 @@ public:
     int getFd() const;
 };
 
+class PixmapData final {
+public:
+    using DataArr = std::span< std::uint8_t >;
+
+private:
+    XcbConnectionShared     mConnection { nullptr };
+    xcb_get_image_reply_t * mReply {};
+    DataArr                 mDataArr {};
+
+public:
+    PixmapData() = default;
+    explicit PixmapData( XcbConnectionShared, xcb_get_image_reply_t * );
+    //PixmapData(const PixmapData&) = default;
+    //PixmapData(PixmapData&&) = default;
+    ~PixmapData();
+
+    //PixmapData& operator= (const PixmapData&) = default;
+    DataArr getData() const;
+    //int            size() const;
+};
+
 class Window {
 protected:
     XcbConnectionShared mConnection {};
@@ -60,15 +82,20 @@ public:
     [[nodiscard]] XCBWindowProp               getProperties() const;
     [[nodiscard]] posix::SharedMemory::Shared getImageData() const;
     [[nodiscard]] posix::SharedMemory::Shared
-                 getImageData( posix::SharedMemory::Shared shm ) const;
-    PixmapDri3Fd getImageDataDri3FD() const;
-    PixmapDri3Fd getOffscreenImageDataDri3FD();
-    virtual void redirect();
-    virtual void unredirect();
-    virtual void release();
-    virtual void map();
-    virtual void unmap();
-    virtual void fullDamaged();
+    getImageData( posix::SharedMemory::Shared shm ) const;
+    [[nodiscard]] posix::SharedMemory::Shared getOffscreenShmImageData();
+    [[nodiscard]] posix::SharedMemory::Shared
+    getOffscreenShmImageData( posix::SharedMemory::Shared shm );
+    [[nodiscard]] PixmapDri3Fd getImageDataDri3FD() const;
+    [[nodiscard]] PixmapDri3Fd getOffscreenImageDataDri3FD();
+    [[nodiscard]] PixmapData   getOffscreenImageData();
+    virtual void               redirect();
+    virtual void               unredirect();
+    virtual void               release();
+    virtual void               map();
+    virtual void               unmap();
+    virtual void               fullDamaged();
+    void                       detach();
 };
 
 class CompositeWindow : public Window {

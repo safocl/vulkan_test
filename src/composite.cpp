@@ -86,7 +86,7 @@ Composite::getCompositeOverleyWindowWithoutInputEvents() const {
     compositeOverlayWindow =
     std::make_shared< xcbwraper::CompositeWindow >( windowsCI );
 
-    //    std::array< std::uint32_t, 1 > vaList { { XCB_EVENT_MASK_EXPOSURE } };
+    //    std::array< u32, 1 > vaList { { XCB_EVENT_MASK_EXPOSURE } };
     //    xcb_change_window_attributes(
     //    *mXcbConnection, *compositeOverlayWindow, XCB_CW_EVENT_MASK, vaList.data() );
 
